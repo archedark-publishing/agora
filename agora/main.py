@@ -288,15 +288,18 @@ async def basic_health(
 ) -> dict[str, int | str]:
     try:
         await run_health_query(session)
+        agents_count = int((await session.scalar(select(func.count(Agent.id)))) or 0)
     except Exception:
         return {
             "status": "unhealthy",
             "version": settings.app_version,
+            "agents_count": 0,
             "uptime_seconds": int(monotonic() - started_at_monotonic),
         }
 
     return {
         "status": "healthy",
         "version": settings.app_version,
+        "agents_count": agents_count,
         "uptime_seconds": int(monotonic() - started_at_monotonic),
     }
