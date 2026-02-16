@@ -6,8 +6,8 @@ from typing import Any
 from time import monotonic
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
-from sqlalchemy import select
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from sqlalchemy import Text, and_, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +50,17 @@ def _compute_stale_metadata(agent: Agent, now: datetime | None = None) -> tuple[
     elapsed = now_utc - reference
     is_stale = elapsed > timedelta(days=STALE_THRESHOLD_DAYS)
     return is_stale, elapsed.days if is_stale else 0
+
+
+def _stale_filter_expression(now: datetime) -> Any:
+    stale_cutoff = now - timedelta(days=STALE_THRESHOLD_DAYS)
+    return and_(
+        Agent.health_status == "unhealthy",
+        or_(
+            and_(Agent.last_healthy_at.is_not(None), Agent.last_healthy_at < stale_cutoff),
+            and_(Agent.last_healthy_at.is_(None), Agent.registered_at < stale_cutoff),
+        ),
+    )
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
@@ -152,6 +163,103 @@ async def get_agent_detail(
         "updated_at": agent.updated_at.isoformat(),
         "is_stale": is_stale,
         "stale_days": stale_days,
+    }
+
+
+@app.get("/api/v1/agents", tags=["agents"])
+async def list_agents(
+    session: AsyncSession = Depends(get_db_session),
+    skill: list[str] | None = Query(default=None),
+    capability: list[str] | None = Query(default=None),
+    tag: list[str] | None = Query(default=None),
+    health: list[str] | None = Query(default=None),
+    q: str | None = Query(default=None),
+    stale: bool | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters: list[Any] = []
+    if skill:
+        filters.append(Agent.skills.overlap(skill))
+    if capability:
+        filters.append(Agent.capabilities.overlap(capability))
+    if tag:
+        filters.append(Agent.tags.overlap(tag))
+
+    if health:
+        allowed_health_values = {"healthy", "unhealthy", "unknown"}
+        invalid_values = [value for value in health if value not in allowed_health_values]
+        if invalid_values:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid health value(s): {', '.join(invalid_values)}",
+            )
+        filters.append(Agent.health_status.in_(health))
+
+    if q:
+        query_like = f"%{q}%"
+        filters.append(
+            or_(
+                Agent.name.ilike(query_like),
+                Agent.description.ilike(query_like),
+                cast(Agent.skills, Text).ilike(query_like),
+                cast(Agent.tags, Text).ilike(query_like),
+            )
+        )
+
+    now_utc = datetime.now(tz=timezone.utc)
+    stale_expr = _stale_filter_expression(now_utc)
+    if stale is True:
+        filters.append(stale_expr)
+    elif stale is False:
+        filters.append(not_(stale_expr))
+
+    base_query = select(Agent)
+    if filters:
+        base_query = base_query.where(*filters)
+
+    total_query = select(func.count()).select_from(base_query.subquery())
+    total = int((await session.scalar(total_query)) or 0)
+
+    ordered_query = (
+        base_query.order_by(
+            case(
+                (Agent.health_status == "healthy", 0),
+                (Agent.health_status == "unknown", 1),
+                (Agent.health_status == "unhealthy", 2),
+                else_=3,
+            ),
+            Agent.registered_at.desc(),
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    agents = list((await session.scalars(ordered_query)).all())
+
+    response_agents: list[dict[str, Any]] = []
+    for agent in agents:
+        is_stale, stale_days = _compute_stale_metadata(agent, now=now_utc)
+        response_agents.append(
+            {
+                "id": str(agent.id),
+                "name": agent.name,
+                "description": agent.description,
+                "url": agent.url,
+                "version": agent.version,
+                "skills": agent.skills or [],
+                "capabilities": agent.capabilities or [],
+                "health_status": agent.health_status,
+                "registered_at": agent.registered_at.isoformat(),
+                "is_stale": is_stale,
+                "stale_days": stale_days,
+            }
+        )
+
+    return {
+        "agents": response_agents,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
