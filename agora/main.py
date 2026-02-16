@@ -5,7 +5,7 @@ from typing import Any
 from time import monotonic
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from sqlalchemy import Text, and_, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -330,6 +330,24 @@ async def list_agents(
         "limit": limit,
         "offset": offset,
     }
+
+
+@app.delete("/api/v1/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["agents"])
+async def delete_agent(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> Response:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    await session.delete(agent)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/v1/health/db", tags=["health"])
