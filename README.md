@@ -26,8 +26,51 @@ cd agora
 docker-compose up
 
 # Or run locally
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn agora.main:app --reload
+```
+
+## Local PostgreSQL Setup (macOS + Linux)
+
+Agora requires PostgreSQL for local development and migrations.
+
+### macOS (Homebrew)
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+export PATH="$(brew --prefix)/opt/postgresql@16/bin:$PATH"
+
+createuser -s agora || true
+createdb -O agora agora || true
+psql -d postgres -c "ALTER USER agora WITH PASSWORD 'password';"
+
+export DATABASE_URL='postgresql+asyncpg://agora:password@localhost:5432/agora'
+```
+
+### Linux (Ubuntu/Debian)
+
+These are also a good baseline for deployment on a Linux VM.
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable --now postgresql
+
+sudo -u postgres psql -c "CREATE ROLE agora WITH LOGIN SUPERUSER PASSWORD 'password';" || true
+sudo -u postgres createdb -O agora agora || true
+
+export DATABASE_URL='postgresql+asyncpg://agora:password@localhost:5432/agora'
+```
+
+### Verify DB + Migrations
+
+```bash
+pg_isready -h localhost -p 5432
+alembic upgrade head
 ```
 
 ## API
