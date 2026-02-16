@@ -1,5 +1,6 @@
 """FastAPI entrypoint for Agora."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from urllib.parse import urlsplit
@@ -8,7 +9,7 @@ from time import monotonic
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy import Text, and_, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agora.config import get_settings
 from agora.database import close_engine, get_db_session, run_health_query
 from agora.models import Agent
+from agora.rate_limit import SlidingWindowRateLimiter
 from agora.security import hash_api_key, verify_api_key
 from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
@@ -24,6 +26,9 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 started_at_monotonic = monotonic()
 STALE_THRESHOLD_DAYS = 7
+RATE_LIMIT_WINDOW_SECONDS = 3600
+rate_limiter = SlidingWindowRateLimiter()
+recovery_logger = logging.getLogger("agora.recovery")
 
 
 @app.on_event("shutdown")
@@ -79,6 +84,58 @@ async def _fetch_recovery_token(verify_url: str) -> str:
         response = await client.get(verify_url)
         response.raise_for_status()
         return response.text
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_recovery_rate_limits(request: Request, agent_id: UUID, action: str) -> None:
+    ip = _client_ip(request)
+    if action == "start":
+        ip_limit = 5
+        agent_limit = 3
+    else:
+        ip_limit = 10
+        agent_limit = 5
+
+    ip_result = rate_limiter.check(
+        key=f"recovery:{action}:ip:{ip}",
+        limit=ip_limit,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if not ip_result.allowed:
+        recovery_logger.warning(
+            "recovery_abuse action=%s agent_id=%s source_ip=%s outcome=rate_limited_ip retry_after=%s",
+            action,
+            agent_id,
+            ip,
+            ip_result.retry_after_seconds,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+            headers={"Retry-After": str(ip_result.retry_after_seconds)},
+        )
+
+    agent_result = rate_limiter.check(
+        key=f"recovery:{action}:agent:{agent_id}",
+        limit=agent_limit,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if not agent_result.allowed:
+        recovery_logger.warning(
+            "recovery_abuse action=%s agent_id=%s source_ip=%s outcome=rate_limited_agent retry_after=%s",
+            action,
+            agent_id,
+            ip,
+            agent_result.retry_after_seconds,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+            headers={"Retry-After": str(agent_result.retry_after_seconds)},
+        )
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
@@ -164,10 +221,17 @@ async def register_agent(
 @app.post("/api/v1/agents/{agent_id}/recovery/start", tags=["recovery"])
 async def start_recovery(
     agent_id: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
+    _enforce_recovery_rate_limits(request, agent_id, action="start")
     agent = await session.get(Agent, agent_id)
     if agent is None:
+        recovery_logger.info(
+            "recovery_abuse action=start agent_id=%s source_ip=%s outcome=not_found",
+            agent_id,
+            _client_ip(request),
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
     challenge_token = token_urlsafe(32)
@@ -179,6 +243,11 @@ async def start_recovery(
     agent.recovery_challenge_created_at = now_utc
     agent.recovery_challenge_expires_at = expires_at
     await session.commit()
+    recovery_logger.info(
+        "recovery_abuse action=start agent_id=%s source_ip=%s outcome=challenge_issued",
+        agent_id,
+        _client_ip(request),
+    )
 
     return {
         "agent_id": str(agent.id),
@@ -191,11 +260,18 @@ async def start_recovery(
 @app.post("/api/v1/agents/{agent_id}/recovery/complete", tags=["recovery"])
 async def complete_recovery(
     agent_id: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, str]:
+    _enforce_recovery_rate_limits(request, agent_id, action="complete")
     agent = await session.get(Agent, agent_id)
     if agent is None:
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=not_found",
+            agent_id,
+            _client_ip(request),
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
     now_utc = datetime.now(tz=timezone.utc)
@@ -204,6 +280,11 @@ async def complete_recovery(
         or agent.recovery_challenge_expires_at is None
         or agent.recovery_challenge_expires_at <= now_utc
     ):
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=no_active_or_expired",
+            agent_id,
+            _client_ip(request),
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No active recovery challenge or challenge expired",
@@ -213,12 +294,22 @@ async def complete_recovery(
     try:
         fetched_token = await _fetch_recovery_token(verify_url)
     except httpx.HTTPError as exc:
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=verify_unreachable",
+            agent_id,
+            _client_ip(request),
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Recovery verification endpoint unreachable or invalid",
         ) from exc
 
     if not verify_api_key(fetched_token, agent.recovery_challenge_hash):
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=verification_mismatch",
+            agent_id,
+            _client_ip(request),
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Recovery challenge verification mismatch",
@@ -229,6 +320,11 @@ async def complete_recovery(
     agent.recovery_challenge_created_at = None
     agent.recovery_challenge_expires_at = None
     await session.commit()
+    recovery_logger.info(
+        "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=success",
+        agent_id,
+        _client_ip(request),
+    )
 
     return {
         "agent_id": str(agent.id),
