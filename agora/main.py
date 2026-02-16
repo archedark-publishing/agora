@@ -1,7 +1,6 @@
 """FastAPI entrypoint for Agora."""
 
 from datetime import datetime, timedelta, timezone
-from hashlib import sha256
 from typing import Any
 from time import monotonic
 from uuid import UUID
@@ -14,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agora.config import get_settings
 from agora.database import close_engine, get_db_session, run_health_query
 from agora.models import Agent
+from agora.security import hash_api_key
 from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
 
@@ -35,10 +35,6 @@ async def root() -> dict[str, str]:
         "version": settings.app_version,
         "status": "ok",
     }
-
-
-def _hash_api_key(api_key: str) -> str:
-    return sha256(api_key.encode("utf-8")).hexdigest()
 
 
 def _compute_stale_metadata(agent: Agent, now: datetime | None = None) -> tuple[bool, int]:
@@ -121,7 +117,7 @@ async def register_agent(
         tags=validated.tags,
         input_modes=validated.input_modes,
         output_modes=validated.output_modes,
-        owner_key_hash=_hash_api_key(api_key),
+        owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
     try:
