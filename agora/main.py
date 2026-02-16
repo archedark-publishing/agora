@@ -7,6 +7,7 @@ from typing import Any
 from time import monotonic
 from uuid import UUID
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from sqlalchemy import Text, and_, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -70,6 +71,14 @@ def _build_verify_url(agent_url: str) -> str:
     if port and port != 443:
         return f"https://{host}:{port}/.well-known/agora-verify"
     return f"https://{host}/.well-known/agora-verify"
+
+
+async def _fetch_recovery_token(verify_url: str) -> str:
+    timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        response = await client.get(verify_url)
+        response.raise_for_status()
+        return response.text
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
@@ -176,6 +185,54 @@ async def start_recovery(
         "challenge_token": challenge_token,
         "verify_url": _build_verify_url(agent.url),
         "expires_at": expires_at.isoformat(),
+    }
+
+
+@app.post("/api/v1/agents/{agent_id}/recovery/complete", tags=["recovery"])
+async def complete_recovery(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, str]:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    now_utc = datetime.now(tz=timezone.utc)
+    if (
+        agent.recovery_challenge_hash is None
+        or agent.recovery_challenge_expires_at is None
+        or agent.recovery_challenge_expires_at <= now_utc
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active recovery challenge or challenge expired",
+        )
+
+    verify_url = _build_verify_url(agent.url)
+    try:
+        fetched_token = await _fetch_recovery_token(verify_url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Recovery verification endpoint unreachable or invalid",
+        ) from exc
+
+    if not verify_api_key(fetched_token, agent.recovery_challenge_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Recovery challenge verification mismatch",
+        )
+
+    agent.owner_key_hash = hash_api_key(api_key)
+    agent.recovery_challenge_hash = None
+    agent.recovery_challenge_created_at = None
+    agent.recovery_challenge_expires_at = None
+    await session.commit()
+
+    return {
+        "agent_id": str(agent.id),
+        "message": "Recovery complete and API key rotated",
     }
 
 
