@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://agora:password@localhost:5432/agora"
     health_check_interval: int = 3600
+    recovery_challenge_ttl_seconds: int = 900
     monthly_budget_cents: int | None = None
 
     model_config = SettingsConfigDict(

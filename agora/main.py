@@ -1,6 +1,8 @@
 """FastAPI entrypoint for Agora."""
 
 from datetime import datetime, timedelta, timezone
+from secrets import token_urlsafe
+from urllib.parse import urlsplit
 from typing import Any
 from time import monotonic
 from uuid import UUID
@@ -57,6 +59,17 @@ def _stale_filter_expression(now: datetime) -> Any:
             and_(Agent.last_healthy_at.is_(None), Agent.registered_at < stale_cutoff),
         ),
     )
+
+
+def _build_verify_url(agent_url: str) -> str:
+    """Return the recovery verification URL for an agent origin."""
+
+    parts = urlsplit(agent_url)
+    host = parts.hostname or ""
+    port = parts.port
+    if port and port != 443:
+        return f"https://{host}:{port}/.well-known/agora-verify"
+    return f"https://{host}/.well-known/agora-verify"
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
@@ -136,6 +149,33 @@ async def register_agent(
         "url": agent.url,
         "registered_at": agent.registered_at.isoformat(),
         "message": "Agent registered successfully",
+    }
+
+
+@app.post("/api/v1/agents/{agent_id}/recovery/start", tags=["recovery"])
+async def start_recovery(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, str]:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    challenge_token = token_urlsafe(32)
+    now_utc = datetime.now(tz=timezone.utc)
+    expires_at = now_utc + timedelta(seconds=settings.recovery_challenge_ttl_seconds)
+
+    # Enforces single active challenge by replacing the prior hash/metadata.
+    agent.recovery_challenge_hash = hash_api_key(challenge_token)
+    agent.recovery_challenge_created_at = now_utc
+    agent.recovery_challenge_expires_at = expires_at
+    await session.commit()
+
+    return {
+        "agent_id": str(agent.id),
+        "challenge_token": challenge_token,
+        "verify_url": _build_verify_url(agent.url),
+        "expires_at": expires_at.isoformat(),
     }
 
 
