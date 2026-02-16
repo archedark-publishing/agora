@@ -17,8 +17,10 @@ This is an issue-ready, dependency-ordered task list for implementation.
 9. Milestone I: Test Suite and Release Readiness
 
 ## Milestone A: Foundation and Data Model
+- Milestone Status: Complete (2026-02-16)
 
 ### A1. Project scaffolding and app wiring
+- Status: Complete (2026-02-16)
 - Priority: P0
 - Depends on: none
 - Deliverables:
@@ -30,6 +32,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - DB health check route can run a simple query
 
 ### A2. SQLAlchemy models for `agents`
+- Status: Complete (2026-02-16)
 - Priority: P0
 - Depends on: A1
 - Deliverables:
@@ -44,6 +47,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - URL column remains unique identity anchor
 
 ### A3. Alembic migrations
+- Status: Complete (2026-02-16)
 - Priority: P0
 - Depends on: A2
 - Deliverables:
@@ -54,6 +58,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - Indexes exist for `skills`, `capabilities`, `tags`, `health_status`, `name`, `last_healthy_at`
 
 ### A4. URL normalization utility
+- Status: Complete (2026-02-16)
 - Priority: P0
 - Depends on: A1
 - Deliverables:
@@ -68,6 +73,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - Invalid schemes rejected (`http`/`https` only)
 
 ### A5. A2A Agent Card validation service
+- Status: Complete (2026-02-16)
 - Priority: P0
 - Depends on: A1
 - Deliverables:
