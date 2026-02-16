@@ -585,17 +585,57 @@ Create 3-5 sample agents for development:
 
 ---
 
+## Beyond Agents: The ERC-8004 Vision
+
+While Agora's MVP focuses on **A2A agent discovery**, the broader vision aligns with ERC-8004's "Trustless Agents" standard, which is actually **service-agnostic trust infrastructure** for the machine economy.
+
+### What ERC-8004 Actually Supports
+
+The standard's registration format accepts:
+- **A2A endpoints** - AI agents (our MVP focus)
+- **MCP endpoints** - Tool servers, data connectors, APIs
+- **Plain URLs** - Any HTTP service
+- **ENS names** - On-chain identity
+- **DIDs** - Decentralized identity
+- **OASF endpoints** - Agent framework interop
+
+The reputation system uses generic metrics (`uptime`, `responseTime`, `successRate`) that apply to **any service with an endpoint**, not just agents.
+
+### Why This Matters
+
+> "The real unlock isn't agents discovering other agents. It's agents discovering and evaluating **any service, tool, or resource** they might need, and doing so through a shared, permissionless trust layer."  
+> — Vitto Rivabella, ["You're Reading 8004 Wrong"](https://x.com/VittoStack)
+
+Agents don't need to natively implement every capability. They become **orchestrators** that discover and route to the best service provider for each task.
+
+### Our Architecture Already Supports This
+
+Our database schema is designed for expansion:
+- `agent_card` field is JSONB (accepts any registration format)
+- Health metrics align with ERC-8004 Reputation Registry
+- Skills/capabilities/tags are generic arrays
+
+**Evolutionary path:**
+1. **Phase 1 (MVP):** A2A agents only
+2. **Phase 2:** MCP tool servers (real demand today)
+3. **Phase 3:** General service registry (oracles, APIs, DeFi services)
+
+Marketing stays narrow ("Agent Discovery") but architecture stays broad.
+
+---
+
 ## Future Considerations
 
 Things explicitly NOT in MVP but worth noting for future:
 
-1. **Federation** - Allow multiple Agora instances to sync
-2. **Reputation** - Track successful interactions, build trust scores
-3. **Categories** - Official taxonomy of agent types
-4. **Verified Agents** - Some form of identity verification
-5. **Analytics** - Track searches, popular agents
-6. **Webhooks** - Notify agents when searched/connected
-7. **Payment Integration** - Tie into Trustee for paid agent services
+1. **Expand Beyond A2A** - Support MCP servers, oracles, general services (ERC-8004 vision)
+2. **Federation** - Allow multiple Agora instances to sync
+3. **Reputation** - Track successful interactions, build trust scores
+4. **Categories** - Official taxonomy of agent types
+5. **Verified Agents** - Some form of identity verification
+6. **Analytics** - Track searches, popular agents
+7. **Webhooks** - Notify agents when searched/connected
+8. **Payment Integration** - Tie into Trustee for paid agent services
 
 ---
 
@@ -614,6 +654,8 @@ MVP is successful if:
 
 - [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/)
 - [A2A Agent Card Schema](https://a2a-protocol.org/latest/specification/#55-agentcard-object-structure)
+- [ERC-8004: Trustless Agents](https://ethereum-magicians.org/t/erc-8004-autonomous-agent-identity/22268)
+- [You're Reading 8004 Wrong (Vitto Rivabella)](https://x.com/VittoStack) - Why ERC-8004 is service-agnostic trust infrastructure
 - [Our Agent Coordination Research](../workspace/obsidian-vault/Research/Agent%20Coordination%20Infrastructure%202026.md)
 
 ---
