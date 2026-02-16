@@ -1,9 +1,10 @@
 """FastAPI entrypoint for Agora."""
 
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any
-from datetime import datetime, timezone
 from time import monotonic
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy import select
@@ -19,6 +20,7 @@ from agora.validation import AgentCardValidationError, validate_agent_card
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 started_at_monotonic = monotonic()
+STALE_THRESHOLD_DAYS = 7
 
 
 @app.on_event("shutdown")
@@ -37,6 +39,17 @@ async def root() -> dict[str, str]:
 
 def _hash_api_key(api_key: str) -> str:
     return sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def _compute_stale_metadata(agent: Agent, now: datetime | None = None) -> tuple[bool, int]:
+    if agent.health_status != "unhealthy":
+        return False, 0
+
+    reference = agent.last_healthy_at or agent.registered_at
+    now_utc = now or datetime.now(tz=timezone.utc)
+    elapsed = now_utc - reference
+    is_stale = elapsed > timedelta(days=STALE_THRESHOLD_DAYS)
+    return is_stale, elapsed.days if is_stale else 0
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
@@ -116,6 +129,29 @@ async def register_agent(
         "url": agent.url,
         "registered_at": agent.registered_at.isoformat(),
         "message": "Agent registered successfully",
+    }
+
+
+@app.get("/api/v1/agents/{agent_id}", tags=["agents"])
+async def get_agent_detail(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    is_stale, stale_days = _compute_stale_metadata(agent)
+    return {
+        "id": str(agent.id),
+        "agent_card": agent.agent_card,
+        "health_status": agent.health_status,
+        "last_health_check": agent.last_health_check.isoformat() if agent.last_health_check else None,
+        "last_healthy_at": agent.last_healthy_at.isoformat() if agent.last_healthy_at else None,
+        "registered_at": agent.registered_at.isoformat(),
+        "updated_at": agent.updated_at.isoformat(),
+        "is_stale": is_stale,
+        "stale_days": stale_days,
     }
 
 
