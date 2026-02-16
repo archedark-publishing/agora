@@ -245,7 +245,29 @@ X-API-Key: <original-key>
 
 ---
 
-#### 6. Health Check
+#### 6. Static Registry Export
+
+```
+GET /registry.json
+```
+
+**Response:** Full dump of all agents (regenerated hourly)
+
+```json
+{
+  "generated_at": "2026-02-16T12:00:00Z",
+  "agents_count": 42,
+  "agents": [
+    { /* full agent card + metadata */ }
+  ]
+}
+```
+
+**Use this for:** Bulk discovery, local caching, building on top of Agora. Served from CDN cache.
+
+---
+
+#### 7. Health Check
 
 ```
 GET /health
@@ -307,17 +329,28 @@ We use the official A2A Protocol v0.3.0 Agent Card format. Simplified version:
 
 ### Liveness Checks
 
-Background task runs every 5 minutes:
+Background task runs every **hour** (configurable, default conservative for cost):
 1. For each agent, attempt to fetch `{agent_url}/.well-known/agent-card.json`
 2. If 200 response with valid Agent Card: status = "healthy"
 3. If 4xx/5xx or timeout (10s): status = "unhealthy"
 4. Update `last_health_check` timestamp
+
+**Cost optimization:** Only check agents that were queried in the last 24 hours. Inactive agents can remain "unknown" until someone searches for them.
 
 ### Stale Agent Policy
 
 - Agents unhealthy for >7 days: marked as "stale"
 - Agents unhealthy for >30 days: auto-removed (with warning email if contact provided)
 - Healthy agents: no expiration
+
+### Static Export
+
+Generate `/registry.json` every hour containing all agents. Heavy consumers should:
+1. Fetch this file (cacheable)
+2. Filter/search locally
+3. Only hit API for real-time needs
+
+This dramatically reduces API load for bulk discovery use cases.
 
 ---
 
@@ -364,14 +397,23 @@ Simple server-rendered UI using Jinja2 + htmx for dynamic updates.
 
 ### Rate Limiting
 
+**Anonymous (no API key):**
 | Endpoint | Limit |
 |----------|-------|
-| GET /agents | 100/minute |
-| POST /agents | 10/minute |
-| PUT /agents | 20/minute |
-| DELETE /agents | 10/minute |
+| GET /agents | 100/hour |
+| GET /registry.json | 10/hour |
+
+**Authenticated (with API key):**
+| Endpoint | Limit |
+|----------|-------|
+| GET /agents | 1000/hour |
+| POST /agents | 10/hour |
+| PUT /agents | 20/hour |
+| DELETE /agents | 10/hour |
 
 Use sliding window algorithm. Return 429 with Retry-After header.
+
+Heavy consumers should use the static `/registry.json` export and cache locally.
 
 ### Input Validation
 
@@ -390,6 +432,18 @@ Use sliding window algorithm. Return 429 with Retry-After header.
 ---
 
 ## Deployment
+
+### Infrastructure
+
+**Hosting:** Dedicated exe.dev VM (separate from other services)
+
+**CDN:** Cloudflare (free tier)
+- All traffic through CF
+- Cache GET requests (5 min TTL)
+- DDoS protection
+- SSL termination
+
+**Database:** PostgreSQL (on same VM or managed service)
 
 ### Docker
 
@@ -438,7 +492,8 @@ volumes:
 | DATABASE_URL | Yes | PostgreSQL connection string |
 | ENVIRONMENT | No | development, staging, production |
 | LOG_LEVEL | No | DEBUG, INFO, WARNING, ERROR |
-| HEALTH_CHECK_INTERVAL | No | Seconds between health checks (default: 300) |
+| HEALTH_CHECK_INTERVAL | No | Seconds between health checks (default: 3600) |
+| MONTHLY_BUDGET_CENTS | No | Cost cap in cents, enables degraded mode when hit |
 
 ---
 
