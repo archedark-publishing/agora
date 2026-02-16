@@ -650,6 +650,302 @@ MVP is successful if:
 
 ---
 
+## Implementation Details (Interview Decisions - 2026-02-16)
+
+This section captures decisions from the requirements interview and is implementation-authoritative for MVP. If any earlier section conflicts with this section, this section wins.
+
+### 1. Overview
+
+The MVP remains a neutral A2A registry with open discovery and API-key ownership. This update locks down edge behavior in four critical areas: ownership recovery, search semantics, URL identity normalization, and stale-agent handling.
+
+Key product posture:
+- Conservative on destructive behavior (no auto-removal in MVP)
+- Explicit and debuggable ownership recovery flow
+- Predictable filtering and sort behavior for discovery clients
+- Minimal schema expansion to support correctness (`last_healthy_at`)
+
+### 2. Requirements (Functional + Edge Cases)
+
+#### 2.1 Functional Requirements
+
+1. URL immutability:
+- Agent URL is the identity anchor.
+- `PUT /agents/{id}` must reject URL changes.
+- Endpoint migration is out of scope for MVP and must use delete + re-register.
+
+2. Ownership recovery (proof-of-control):
+- Support a two-step recovery flow:
+  - `POST /agents/{id}/recovery/start`
+  - `POST /agents/{id}/recovery/complete`
+- Proof is serving a challenge token at `/.well-known/agora-verify` on the agent origin.
+- On successful complete, rotate ownership to a new API key provided by client in `X-API-Key`.
+
+3. Search/filter semantics:
+- Repeated filters use OR within a filter type.
+- Different filter types combine with AND.
+- `q` uses case-insensitive `ILIKE` matching in MVP.
+
+4. Stale behavior:
+- No auto-removal in MVP.
+- Support `stale=true|false` filter.
+- Expose computed `is_stale` and `stale_days` in responses.
+
+5. Default ordering:
+- `/agents` default sort is health-first, then newest registration:
+  - `healthy`
+  - `unknown`
+  - `unhealthy`
+  - within each group: `registered_at DESC`
+
+#### 2.2 Edge Case Requirements
+
+1. Never-healthy agents:
+- If `health_status = unhealthy` and `last_healthy_at IS NULL`, compute staleness from `registered_at`.
+
+2. Unknown is not stale:
+- `unknown` health status must never be marked stale.
+
+3. Recovery token replacement:
+- Only one active recovery token per agent.
+- Calling `recovery/start` invalidates any prior unexpired token.
+
+4. Recovery on unknown ID:
+- Return `404`.
+- Apply rate limiting and abuse logging to recovery endpoints.
+
+5. URL duplicate prevention:
+- Apply strict URL normalization before uniqueness checks and persistence.
+
+### 3. Technical Specification (Architecture, Data Model, APIs)
+
+#### 3.1 Architecture and Behavior
+
+1. URL canonicalization is a required pre-write step for register/update validation.
+2. Recovery verification reuses existing outbound HTTP capability from health-check infrastructure.
+3. Concurrent updates use last-write-wins in MVP.
+
+#### 3.2 Data Model
+
+Add to `agents` table:
+
+```sql
+ALTER TABLE agents
+  ADD COLUMN last_healthy_at TIMESTAMP NULL,
+  ADD COLUMN recovery_challenge_hash VARCHAR(64) NULL,
+  ADD COLUMN recovery_challenge_expires_at TIMESTAMP NULL,
+  ADD COLUMN recovery_challenge_created_at TIMESTAMP NULL;
+
+CREATE INDEX idx_agents_last_healthy_at ON agents (last_healthy_at);
+```
+
+Notes:
+- Keep existing `url` column as unique identity field.
+- Persist URL in normalized canonical form in `url`.
+- Store recovery challenge as SHA-256 hash, not plaintext.
+
+#### 3.3 URL Normalization Rules (Strict)
+
+Apply before register/update comparison and before DB write:
+
+1. Parse URL; only `http` and `https` are allowed.
+2. Lowercase scheme and host.
+3. Remove default ports (`:80` for HTTP, `:443` for HTTPS).
+4. Strip trailing slash from path except root `/`.
+5. Preserve path and query exactly (no query reordering).
+6. Drop URL fragment.
+
+Examples:
+- `https://Agent.Example.com:443/a2a/` -> `https://agent.example.com/a2a`
+- `https://agent.example.com/a2a?x=1` -> `https://agent.example.com/a2a?x=1`
+
+#### 3.4 API Contracts
+
+##### 3.4.1 List/Search Agents
+
+`GET /agents`
+
+Add query parameter:
+- `stale` (boolean): `true` or `false`
+
+Filter semantics:
+- OR within same type, AND across different types.
+- Example:
+  - `?skill=weather&skill=translation` => skill is weather OR translation
+  - `?skill=weather&health=healthy` => skill matches AND health is healthy
+
+Text search:
+- `q` is implemented with `ILIKE` across name, description, skills, and tags.
+
+Default ordering:
+- `healthy` first, then `unknown`, then `unhealthy`, then `registered_at DESC`.
+
+##### 3.4.2 Recovery Start
+
+`POST /agents/{id}/recovery/start`
+
+Behavior:
+1. Validate agent exists, else `404`.
+2. Generate random challenge token.
+3. Hash token (SHA-256) and store hash + expiry + created time.
+4. Invalidate any previously active token for this agent.
+5. Return plaintext token once to caller.
+
+Response:
+
+```json
+{
+  "agent_id": "uuid",
+  "challenge_token": "random-token",
+  "verify_url": "https://agent.example.com/.well-known/agora-verify",
+  "expires_at": "2026-02-16T12:15:00Z"
+}
+```
+
+Status codes:
+- `200` success
+- `404` agent not found
+- `429` rate limited
+
+##### 3.4.3 Recovery Complete
+
+`POST /agents/{id}/recovery/complete`  
+Header: `X-API-Key: <new-client-generated-key>`
+
+Behavior:
+1. Validate agent exists, else `404`.
+2. Validate active unexpired challenge exists, else `400`.
+3. Fetch `https://<agent-origin>/.well-known/agora-verify` (10s timeout).
+4. Response body must be plain text exactly equal to the active challenge token.
+5. If valid, hash provided new API key and replace `owner_key_hash`.
+6. Clear challenge fields.
+
+Status codes:
+- `200` key rotated
+- `400` no active challenge, expired challenge, or verification mismatch
+- `404` agent not found
+- `429` rate limited
+
+##### 3.4.4 Update Agent
+
+`PUT /agents/{id}`
+
+Additional enforced behavior:
+- URL in submitted Agent Card, after normalization, must match stored URL exactly.
+- If not equal, return `400` with URL-immutable error.
+
+#### 3.5 Health and Stale Computation
+
+Definitions:
+- `STALE_THRESHOLD_DAYS = 7` (MVP default)
+
+On health check success:
+- `health_status = healthy`
+- `last_health_check = now`
+- `last_healthy_at = now`
+
+On health check failure:
+- `health_status = unhealthy`
+- `last_health_check = now`
+- `last_healthy_at` unchanged
+
+Stale function:
+1. If `health_status != unhealthy`: `is_stale = false`
+2. Else if `last_healthy_at IS NOT NULL`: stale if `now - last_healthy_at > threshold`
+3. Else (never healthy): stale if `now - registered_at > threshold`
+
+`stale=true` filter:
+- Return only rows where `is_stale = true`
+
+`stale=false` filter:
+- Return all rows where `is_stale = false` (includes healthy, unknown, and recently unhealthy)
+
+No auto-removal:
+- Disable 30-day auto-delete behavior for MVP.
+- Stale is advisory only for manual review.
+
+#### 3.6 Response Shape Additions
+
+Add computed fields:
+- `is_stale` (boolean)
+- `stale_days` (integer, 0 when not stale)
+
+Expose in:
+- `GET /agents` items
+- `GET /agents/{id}`
+- `GET /registry.json` entries
+
+### 4. UI/UX Specification
+
+1. Search UI:
+- Add stale filter control (`All`, `Stale only`, `Not stale`).
+- Keep existing skill/capability/health filters.
+
+2. Result cards:
+- Show health badge and stale badge when `is_stale = true`.
+- Preserve mobile responsiveness.
+
+3. Agent detail page:
+- Show computed stale metadata (`is_stale`, `stale_days`, `last_healthy_at`, `last_health_check`).
+- If stale, show non-destructive warning ("Candidate for manual review").
+
+4. Registration/update UX:
+- Clearly indicate URL immutability after initial registration.
+- Show normalized URL in validation feedback.
+
+5. Recovery UX:
+- Step 1 screen: display token + verify URL + expiration timer.
+- Step 2 screen: submit new API key and run verification.
+- Show explicit failure states: expired token, token mismatch, endpoint unreachable.
+
+### 5. Constraints & Assumptions
+
+1. MVP constraints:
+- No endpoint migration workflow.
+- No auto-removal of stale agents.
+- Last-write-wins on concurrent updates.
+
+2. Security constraints:
+- Recovery endpoints must be rate-limited.
+- Recovery attempts must be logged with timestamp, agent ID, source IP, and outcome.
+- Recovery challenge tokens are never logged in plaintext.
+
+3. Operational assumptions:
+- Health checker HTTP client timeout remains 10 seconds.
+- Recovery verification uses same timeout and outbound egress rules.
+- Agent IDs are publicly discoverable; anti-enumeration by obscurity is not required.
+
+4. Suggested recovery limits (MVP defaults):
+- `POST /recovery/start`: 5/hour per IP, 3/hour per agent
+- `POST /recovery/complete`: 10/hour per IP, 5/hour per agent
+
+### 6. Open Questions
+
+No blocking open questions for MVP implementation.  
+Post-MVP candidates:
+- Add optimistic concurrency (`If-Match` / ETag)
+- Upgrade search to Postgres full-text or trigram
+- Revisit auto-removal once false-positive rate is understood in production
+
+### 7. Appendix (Interview Notes and Rationale)
+
+Final decisions from interview:
+1. `1C` URL immutable; migration out of scope for MVP
+2. `2B` Proof-of-control recovery flow
+3. `3B + ILIKE` OR within filter type, AND across types; text search via ILIKE
+4. `4C` No auto-removal in MVP; stale exposed via filter + computed fields
+5. `1A` Recovery flow is two-step (`start` then `complete`)
+6. `2A` Strict URL normalization
+7. `3C` Unknown agent recovery returns `404` + rate limiting and abuse logging
+8. `4C` Default ordering health-first then `registered_at DESC`
+9. `1A` Add `last_healthy_at` for correct stale computation
+10. `2A` Verify at origin-level `/.well-known/agora-verify`, plain text token
+11. `1A` One active token per agent; new `start` invalidates prior token
+12. `2A` Client supplies new key in `X-API-Key` on `complete`
+13. `3A` `stale=true` only for long-unhealthy, including never-healthy fallback from `registered_at`
+14. `4C` Keep single source of truth in `SPEC.md`
+
+---
+
 ## References
 
 - [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/)
