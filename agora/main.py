@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agora.config import get_settings
 from agora.database import close_engine, get_db_session, run_health_query
 from agora.models import Agent
-from agora.security import hash_api_key
+from agora.security import hash_api_key, verify_api_key
 from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
 
@@ -159,6 +159,79 @@ async def get_agent_detail(
         "updated_at": agent.updated_at.isoformat(),
         "is_stale": is_stale,
         "stale_days": stale_days,
+    }
+
+
+@app.put("/api/v1/agents/{agent_id}", tags=["agents"])
+async def update_agent(
+    agent_id: UUID,
+    agent_card_payload: dict[str, Any],
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, str]:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    try:
+        validated = validate_agent_card(agent_card_payload)
+    except AgentCardValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": exc.errors,
+            },
+        ) from exc
+
+    try:
+        normalized_url = normalize_url(str(validated.card.url))
+    except URLNormalizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "url",
+                        "message": str(exc),
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
+
+    if normalized_url != agent.url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent URL is immutable and cannot be changed",
+        )
+
+    normalized_card = validated.card.model_dump(by_alias=True, mode="json")
+    normalized_card["url"] = normalized_url
+
+    agent.name = validated.card.name
+    agent.description = validated.card.description
+    agent.version = validated.card.version
+    agent.protocol_version = validated.card.protocol_version
+    agent.agent_card = normalized_card
+    agent.skills = validated.skills
+    agent.capabilities = validated.capabilities
+    agent.tags = validated.tags
+    agent.input_modes = validated.input_modes
+    agent.output_modes = validated.output_modes
+    await session.commit()
+    await session.refresh(agent)
+
+    return {
+        "id": str(agent.id),
+        "name": agent.name,
+        "url": agent.url,
+        "updated_at": agent.updated_at.isoformat(),
+        "message": "Agent updated successfully",
     }
 
 
