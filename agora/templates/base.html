@@ -51,10 +51,23 @@
       padding: 0 1.5rem;
     }
 
+    /* Greek key pattern */
+    .greek-key {
+      height: 6px;
+      background:
+        linear-gradient(135deg, var(--border) 25%, transparent 25%) -6px 0,
+        linear-gradient(225deg, var(--border) 25%, transparent 25%) -6px 0,
+        linear-gradient(315deg, var(--border) 25%, transparent 25%),
+        linear-gradient(45deg, var(--border) 25%, transparent 25%);
+      background-size: 12px 6px;
+      background-color: var(--bg);
+      opacity: 0.6;
+    }
+
     /* Header */
     .header {
       background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      border-bottom: none;
       position: sticky;
       top: 0;
       z-index: 100;
@@ -406,6 +419,7 @@
         <a href="/docs">API</a>
       </nav>
     </div>
+    <div class="greek-key"></div>
   </header>
   <main class="main">
     <div class="container">
