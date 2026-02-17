@@ -48,6 +48,7 @@ async def _check_single_agent(agent: Agent, client: httpx.AsyncClient, now_utc: 
     """
 
     probe_url = build_agent_card_probe_url(agent.url)
+    previous_last_healthy = agent.last_healthy_at
     try:
         response = await client.get(probe_url, follow_redirects=False)
         response.raise_for_status()
@@ -56,7 +57,7 @@ async def _check_single_agent(agent: Agent, client: httpx.AsyncClient, now_utc: 
     except (httpx.HTTPError, ValueError, AgentCardValidationError):
         agent.health_status = "unhealthy"
         agent.last_health_check = now_utc
-        # Important: leave last_healthy_at unchanged on failures.
+        agent.last_healthy_at = previous_last_healthy
         return False
 
     agent.health_status = "healthy"
