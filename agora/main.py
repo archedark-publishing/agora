@@ -143,6 +143,22 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _enforce_rate_limit(
+    *,
+    key: str,
+    limit: int,
+    window_seconds: int = RATE_LIMIT_WINDOW_SECONDS,
+) -> None:
+    result = rate_limiter.check(key=key, limit=limit, window_seconds=window_seconds)
+    if result.allowed:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Rate limit exceeded",
+        headers={"Retry-After": str(result.retry_after_seconds)},
+    )
+
+
 def _enforce_recovery_rate_limits(request: Request, agent_id: UUID, action: str) -> None:
     ip = _client_ip(request)
     if action == "start":
@@ -194,9 +210,15 @@ def _enforce_recovery_rate_limits(request: Request, agent_id: UUID, action: str)
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
 async def register_agent(
     agent_card_payload: dict[str, Any],
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, str]:
+    _enforce_rate_limit(
+        key=f"api:post_agents:key:{hash_api_key(api_key)}",
+        limit=10,
+    )
+
     try:
         validated = validate_agent_card(agent_card_payload)
     except AgentCardValidationError as exc:
@@ -413,9 +435,15 @@ async def get_agent_detail(
 async def update_agent(
     agent_id: UUID,
     agent_card_payload: dict[str, Any],
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, str]:
+    _enforce_rate_limit(
+        key=f"api:put_agent:key:{hash_api_key(api_key)}",
+        limit=20,
+    )
+
     agent = await session.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
@@ -484,6 +512,7 @@ async def update_agent(
 
 @app.get("/api/v1/agents", tags=["agents"])
 async def list_agents(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     skill: list[str] | None = Query(default=None),
     capability: list[str] | None = Query(default=None),
@@ -494,6 +523,18 @@ async def list_agents(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        _enforce_rate_limit(
+            key=f"api:get_agents:key:{hash_api_key(api_key)}",
+            limit=1000,
+        )
+    else:
+        _enforce_rate_limit(
+            key=f"api:get_agents:ip:{_client_ip(request)}",
+            limit=100,
+        )
+
     filters: list[Any] = []
     if skill:
         filters.append(Agent.skills.overlap(skill))
@@ -628,9 +669,15 @@ async def stale_candidates_report(
 @app.delete("/api/v1/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["agents"])
 async def delete_agent(
     agent_id: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> Response:
+    _enforce_rate_limit(
+        key=f"api:delete_agent:key:{hash_api_key(api_key)}",
+        limit=10,
+    )
+
     agent = await session.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
@@ -644,8 +691,13 @@ async def delete_agent(
 
 
 @app.get("/api/v1/registry.json", tags=["registry"])
-async def registry_export() -> JSONResponse:
+async def registry_export(request: Request) -> JSONResponse:
     global latest_registry_snapshot
+    _enforce_rate_limit(
+        key=f"api:get_registry:ip:{_client_ip(request)}",
+        limit=10,
+    )
+
     if latest_registry_snapshot is None:
         latest_registry_snapshot = await build_registry_snapshot(AsyncSessionLocal)
 
