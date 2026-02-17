@@ -132,7 +132,7 @@
           name="name" 
           class="input" 
           placeholder="My Agent"
-          value="{{ form.name|default('') }}"
+          value="{{ (form.name or '') if form else '' }}"
           required
         >
       </div>
@@ -145,7 +145,7 @@
           name="url" 
           class="input mono" 
           placeholder="https://example.com/agent"
-          value="{{ form.url|default('') }}"
+          value="{{ (form.url or '') if form else '' }}"
           required
         >
         <span class="form-hint">The URL where your agent's A2A endpoint lives</span>
@@ -158,7 +158,7 @@
           name="description" 
           class="input textarea" 
           placeholder="What does your agent do?"
-        >{{ form.description|default('') }}</textarea>
+        >{{ (form.description or '') if form else '' }}</textarea>
       </div>
 
       <div class="form-group">
@@ -169,7 +169,7 @@
           class="input textarea mono" 
           placeholder='{"protocolVersion": "0.3.0", "skills": [...]}'
           style="min-height: 120px;"
-        >{{ form.card_json|default('') }}</textarea>
+        >{{ (form.card_json or '') if form else '' }}</textarea>
         <span class="form-hint">Full A2A Agent Card. If omitted, we'll generate a basic one from the fields above.</span>
       </div>
 

@@ -63,7 +63,7 @@
             {% endif %}
             <div class="agent-meta">
               <span class="text-xs text-tertiary">
-                Registered {{ agent.created_at | timeago if agent.created_at else 'recently' }}
+                {% if agent.created_at %}Registered{% else %}Recently added{% endif %}
               </span>
             </div>
           </a>

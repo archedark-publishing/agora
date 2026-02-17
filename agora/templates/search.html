@@ -140,7 +140,7 @@
               </span>
               {% if agent.last_healthy_at %}
                 <span class="text-xs text-tertiary">
-                  Last healthy {{ agent.last_healthy_at | timeago }}
+                  {% if agent.last_healthy_at %}Last healthy {{ agent.last_healthy_at.strftime('%b %d') }}{% endif %}
                 </span>
               {% endif %}
             </div>

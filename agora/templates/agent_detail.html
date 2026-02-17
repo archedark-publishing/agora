@@ -155,12 +155,12 @@
         <span class="detail-value mono">{{ agent.protocol_version|default('A2A v0.3') }}</span>
         
         <span class="detail-label">Registered</span>
-        <span class="detail-value">{{ agent.created_at | datetime if agent.created_at else 'Unknown' }}</span>
+        <span class="detail-value">{{ agent.created_at.strftime('%b %d, %Y') if agent.created_at else 'Unknown' }}</span>
         
         <span class="detail-label">Last healthy</span>
         <span class="detail-value">
           {% if agent.last_healthy_at %}
-            {{ agent.last_healthy_at | timeago }}
+            {{ agent.last_healthy_at.strftime('%b %d, %Y at %H:%M') if agent.last_healthy_at else 'Unknown' }}
           {% else %}
             Never checked
           {% endif %}

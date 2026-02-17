@@ -257,7 +257,7 @@
           name="url" 
           class="input mono" 
           placeholder="https://example.com/agent"
-          value="{{ form.url|default('') }}"
+          value="{{ (form.url or '') if form else '' }}"
           required
         >
         <span class="form-hint">The URL where your agent is registered</span>
