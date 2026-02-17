@@ -25,7 +25,7 @@ Date: 2026-02-17
 - [x] Integration tests cover lifecycle, recovery, stale filters, and ordering semantics.
 - [x] `pytest -q` is passing locally.
 - [x] Docker assets are present (`Dockerfile`, `docker-compose.yml`).
-- [ ] Compose boot verification (`docker compose config` / `docker compose up`) requires Docker CLI, which is not available in this execution environment.
+- [x] Compose boot verification passed (`docker-compose config` and `docker-compose up --build` smoke test).
 - [x] Seed script for sample agents is available (`scripts/seed_sample_agents.py`).
 
 ## Final Go/No-go
