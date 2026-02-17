@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from email.utils import format_datetime
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from urllib.parse import urlsplit
@@ -648,9 +649,18 @@ async def registry_export() -> JSONResponse:
     if latest_registry_snapshot is None:
         latest_registry_snapshot = await build_registry_snapshot(AsyncSessionLocal)
 
+    generated_at = latest_registry_snapshot.get("generated_at", "")
+    agents_count = latest_registry_snapshot.get("agents_count", 0)
+    generated_dt = datetime.fromisoformat(generated_at) if generated_at else datetime.now(tz=timezone.utc)
+    etag = f"\"{generated_at}:{agents_count}\""
+
     return JSONResponse(
         content=latest_registry_snapshot,
-        headers={"Cache-Control": "public, max-age=300"},
+        headers={
+            "Cache-Control": "public, max-age=300, stale-while-revalidate=120",
+            "ETag": etag,
+            "Last-Modified": format_datetime(generated_dt, usegmt=True),
+        },
     )
 
 
