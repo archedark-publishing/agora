@@ -1,0 +1,15 @@
+{% macro health_badge(health_status) -%}
+  {% if health_status == "healthy" %}
+    <span class="badge badge-healthy">Healthy</span>
+  {% elif health_status == "unhealthy" %}
+    <span class="badge badge-unhealthy">Unhealthy</span>
+  {% else %}
+    <span class="badge badge-unknown">Unknown</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro stale_badge(is_stale, stale_days) -%}
+  {% if is_stale %}
+    <span class="badge badge-stale">Stale {{ stale_days }}d</span>
+  {% endif %}
+{%- endmacro %}

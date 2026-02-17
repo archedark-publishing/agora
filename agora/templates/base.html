@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Agora{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --bg-accent: #f7d7a8;
+      --surface: #fff9f0;
+      --ink: #1f2225;
+      --muted: #5b6169;
+      --line: #d9cfbf;
+      --brand: #0f766e;
+      --danger: #b91c1c;
+      --warning: #b45309;
+      --ok: #166534;
+      --shadow: 0 14px 30px rgba(33, 37, 41, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 20%, rgba(15, 118, 110, 0.16), transparent 40%),
+        radial-gradient(circle at 85% 0%, rgba(180, 83, 9, 0.17), transparent 35%),
+        linear-gradient(165deg, var(--bg), var(--bg-accent));
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+    .nav {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--brand);
+      text-decoration: none;
+      font-size: 1.25rem;
+    }
+    .links {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .links a {
+      text-decoration: none;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.9rem;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem;
+      box-shadow: var(--shadow);
+    }
+    .mono { font-family: "IBM Plex Mono", monospace; }
+    .muted { color: var(--muted); }
+    .stack { display: grid; gap: 0.75rem; }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.75rem;
+      line-height: 1;
+      border-radius: 999px;
+      padding: 0.3rem 0.55rem;
+      border: 1px solid transparent;
+    }
+    .badge-healthy {
+      color: var(--ok);
+      background: #dcfce7;
+      border-color: #86efac;
+    }
+    .badge-unknown {
+      color: #92400e;
+      background: #fef3c7;
+      border-color: #fcd34d;
+    }
+    .badge-unhealthy {
+      color: var(--danger);
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
+    .badge-stale {
+      color: var(--warning);
+      background: #ffedd5;
+      border-color: #fdba74;
+    }
+    input, select, textarea, button {
+      font: inherit;
+    }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 10px;
+      padding: 0.6rem 0.7rem;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      background: var(--brand);
+      color: #fff;
+      padding: 0.6rem 0.85rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    @media (max-width: 640px) {
+      .shell { padding: 0.75rem; }
+      .panel { border-radius: 12px; }
+      .links a { font-size: 0.82rem; }
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <main class="shell">
+    <header class="nav">
+      <a class="brand" href="/">Agora</a>
+      <nav class="links">
+        <a href="/search">Search</a>
+        <a href="/register">Register</a>
+        <a href="/recover">Recover</a>
+        <a href="/docs">API Docs</a>
+      </nav>
+    </header>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
