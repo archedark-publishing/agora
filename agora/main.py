@@ -26,6 +26,7 @@ from agora.models import Agent
 from agora.query_tracker import QueryTracker
 from agora.rate_limit import SlidingWindowRateLimiter
 from agora.registry_export import build_registry_snapshot
+from agora.sanitization import sanitize_json_strings, sanitize_ui_text
 from agora.security import hash_api_key, verify_api_key
 from agora.stale import compute_agent_stale_metadata, stale_filter_expression
 from agora.url_safety import (
@@ -210,9 +211,9 @@ async def home_page(
         cards.append(
             {
                 "id": str(agent.id),
-                "name": agent.name,
-                "description": agent.description or "",
-                "url": agent.url,
+                "name": sanitize_ui_text(agent.name, max_length=255),
+                "description": sanitize_ui_text(agent.description, max_length=2000),
+                "url": sanitize_ui_text(agent.url, max_length=2048),
                 "health_status": agent.health_status,
                 "is_stale": is_stale,
                 "stale_days": stale_days,
@@ -270,12 +271,24 @@ async def search_page(
     )
     has_previous = offset > 0
     has_next = (offset + limit) < results["total"]
+    safe_results = {
+        **results,
+        "agents": [
+            {
+                **agent,
+                "name": sanitize_ui_text(agent["name"], max_length=255),
+                "description": sanitize_ui_text(agent.get("description"), max_length=2000),
+                "url": sanitize_ui_text(agent["url"], max_length=2048),
+            }
+            for agent in results["agents"]
+        ],
+    }
 
     return templates.TemplateResponse(
         "search.html",
         {
             "request": request,
-            "results": results,
+            "results": safe_results,
             "filters": {
                 "q": q or "",
                 "skill": skill or "",
@@ -301,6 +314,17 @@ async def agent_detail_page(
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     detail = await get_agent_detail(agent_id=agent_id, session=session)
+    safe_agent_card = dict(detail["agent_card"])
+    safe_agent_card["name"] = sanitize_ui_text(safe_agent_card.get("name"), max_length=255)
+    safe_agent_card["description"] = sanitize_ui_text(
+        safe_agent_card.get("description"),
+        max_length=2000,
+    )
+    safe_agent_card["url"] = sanitize_ui_text(safe_agent_card.get("url"), max_length=2048)
+    detail = {
+        **detail,
+        "agent_card": safe_agent_card,
+    }
     return templates.TemplateResponse(
         "agent_detail.html",
         {
@@ -603,8 +627,9 @@ async def register_agent(
         limit=10,
     )
 
+    sanitized_payload = sanitize_json_strings(agent_card_payload)
     try:
-        validated = validate_agent_card(agent_card_payload)
+        validated = validate_agent_card(sanitized_payload)
     except AgentCardValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -868,8 +893,9 @@ async def update_agent(
     if not verify_api_key(api_key, agent.owner_key_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
+    sanitized_payload = sanitize_json_strings(agent_card_payload)
     try:
-        validated = validate_agent_card(agent_card_payload)
+        validated = validate_agent_card(sanitized_payload)
     except AgentCardValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
