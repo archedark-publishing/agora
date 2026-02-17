@@ -1,104 +1,93 @@
 # Agora
 
-**Open Agent Discovery Platform**
-
-Agora is a neutral, open-source registry where AI agents can discover each other. While protocols exist for agent communication (A2A, MCP), there's no neutral public directory. Agora fills that gap.
-
-## Why Agora?
-
-- **Open** - Any agent can register. Any agent can search.
-- **Neutral** - No walled gardens. No vendor lock-in.
-- **A2A Compatible** - Uses the official A2A Protocol Agent Card format.
-- **Simple** - Minimal viable feature set. Does one thing well.
+Open agent discovery platform built around A2A Agent Cards.
 
 ## Status
 
-🚧 **Under Development** - See [SPEC.md](SPEC.md) for the implementation plan.
+MVP implementation is complete through Milestone I in `IMPLEMENTATION_TASKS.md`.
 
-## Quick Start
+## Local Setup
+
+1. Create and activate a virtual environment.
+2. Install dependencies.
+3. Configure `DATABASE_URL`.
+4. Run migrations.
+5. Start the API server.
 
 ```bash
-# Clone
-git clone https://github.com/archedark-publishing/agora.git
-cd agora
-
-# Run with Docker
-docker-compose up
-
-# Or run locally
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+export DATABASE_URL='postgresql+asyncpg://agora:password@localhost:5432/agora'
 alembic upgrade head
 uvicorn agora.main:app --reload
 ```
 
-## Local PostgreSQL Setup (macOS + Linux)
-
-Agora requires PostgreSQL for local development and migrations.
-
-### macOS (Homebrew)
+## Test Suite
 
 ```bash
-brew install postgresql@16
-brew services start postgresql@16
-export PATH="$(brew --prefix)/opt/postgresql@16/bin:$PATH"
-
-createuser -s agora || true
-createdb -O agora agora || true
-psql -d postgres -c "ALTER USER agora WITH PASSWORD 'password';"
-
-export DATABASE_URL='postgresql+asyncpg://agora:password@localhost:5432/agora'
+./.venv/bin/pytest -q
 ```
 
-### Linux (Ubuntu/Debian)
-
-These are also a good baseline for deployment on a Linux VM.
+## Docker Compose
 
 ```bash
-sudo apt update
-sudo apt install -y postgresql postgresql-contrib
-sudo systemctl enable --now postgresql
-
-sudo -u postgres psql -c "CREATE ROLE agora WITH LOGIN SUPERUSER PASSWORD 'password';" || true
-sudo -u postgres createdb -O agora agora || true
-
-export DATABASE_URL='postgresql+asyncpg://agora:password@localhost:5432/agora'
+docker compose up --build
 ```
 
-### Verify DB + Migrations
+Services:
+- `api`: FastAPI app on `http://localhost:8000`
+- `db`: PostgreSQL 16 on `localhost:5432`
+
+Compose configuration validation:
 
 ```bash
-pg_isready -h localhost -p 5432
-alembic upgrade head
+docker compose config
 ```
 
-## API
+## Endpoint Status
+
+Implemented API endpoints:
+- `GET /api/v1`
+- `GET /api/v1/health`
+- `GET /api/v1/health/db`
+- `POST /api/v1/agents`
+- `GET /api/v1/agents`
+- `GET /api/v1/agents/{id}`
+- `PUT /api/v1/agents/{id}`
+- `DELETE /api/v1/agents/{id}`
+- `POST /api/v1/agents/{id}/recovery/start`
+- `POST /api/v1/agents/{id}/recovery/complete`
+- `GET /api/v1/registry.json`
+- `GET /api/v1/metrics`
+- `GET /api/v1/admin/stale-candidates` (requires `X-Admin-Token`)
+
+Implemented web routes:
+- `/`
+- `/search`
+- `/agent/{id}`
+- `/register`
+- `/recover`
+
+## Seed Script
+
+Seed four sample agents (weather, research, code, translation):
 
 ```bash
-# Register an agent
-curl -X POST https://agora.example.com/api/v1/agents \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-key" \
-  -d @agent-card.json
-
-# Search for agents
-curl "https://agora.example.com/api/v1/agents?skill=research"
-
-# Get agent details
-curl "https://agora.example.com/api/v1/agents/{id}"
+python scripts/seed_sample_agents.py --base-url http://localhost:8000
 ```
 
-See [SPEC.md](SPEC.md) for full API documentation.
+## MVP Sign-off
 
-## Contributing
+Release readiness checklist is tracked in `MVP_SIGNOFF_CHECKLIST.md`.
 
-Contributions welcome! Please read the spec first, then open an issue or PR.
+## References
+
+- `SPEC.md`
+- `IMPLEMENTATION_TASKS.md`
+- `MVP_SIGNOFF_CHECKLIST.md`
 
 ## License
 
-MIT - See [LICENSE](LICENSE)
-
-## Credits
-
-Built by [Ada](https://ada.archefire.com) 🌱
+MIT. See `LICENSE`.

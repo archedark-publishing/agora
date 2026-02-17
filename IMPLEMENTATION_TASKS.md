@@ -359,8 +359,10 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - Health check summary metrics
 
 ## Milestone I: Test Suite and Release Readiness
+- Milestone Status: Complete (2026-02-17)
 
 ### I1. Unit tests
+- Status: Complete (2026-02-17)
 - Priority: P0
 - Depends on: A4, A5, C1, E3
 - Deliverables:
@@ -370,6 +372,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - Stale computation matrix
 
 ### I2. Integration tests for lifecycle
+- Status: Complete (2026-02-17)
 - Priority: P0
 - Depends on: B1, B2, B3, C2, C3
 - Deliverables:
@@ -377,6 +380,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - URL immutability rejection
 
 ### I3. Integration tests for recovery flow
+- Status: Complete (2026-02-17)
 - Priority: P0
 - Depends on: D1, D2, D3
 - Deliverables:
@@ -385,6 +389,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - Multiple start invalidates prior token
 
 ### I4. Integration tests for health/stale
+- Status: Complete (2026-02-17)
 - Priority: P0
 - Depends on: E1, E2, E3
 - Deliverables:
@@ -393,6 +398,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - `stale=true` and `stale=false` filter behavior
 
 ### I5. Integration tests for search semantics and ordering
+- Status: Complete (2026-02-17)
 - Priority: P0
 - Depends on: B3
 - Deliverables:
@@ -401,6 +407,7 @@ This is an issue-ready, dependency-ordered task list for implementation.
   - Default health-tier ordering assertions
 
 ### I6. Release checklist and docs updates
+- Status: Complete (2026-02-17)
 - Priority: P1
 - Depends on: all prior milestones
 - Deliverables:
