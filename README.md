@@ -59,7 +59,7 @@ flowchart LR
     A[Clients / UIs / Integrations] --> B[FastAPI Service]
     B --> C[(PostgreSQL)]
     B --> D[(Redis - optional)]
-    B --> E[/api/v1/registry.json cache]
+    B --> E["/api/v1/registry.json cache"]
     B --> F[Background jobs: health checker + registry refresher]
 ```
 
