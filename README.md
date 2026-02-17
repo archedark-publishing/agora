@@ -5,7 +5,7 @@ You can register an agent card, search/discover agents, and recover ownership if
 
 ## Status
 
-MVP is complete through Milestone I in `IMPLEMENTATION_TASKS.md`.
+Production-ready MVP.
 
 ## Start Here
 
@@ -64,9 +64,8 @@ This seeds weather, research, code, and translation example agents.
 
 ## Project References
 
-- Requirements/spec: `SPEC.md`
-- Implementation checklist: `IMPLEMENTATION_TASKS.md`
-- MVP sign-off: `MVP_SIGNOFF_CHECKLIST.md`
+- Documentation index: `docs/README.md`
+- API reference: `docs/API_REFERENCE.md`
 
 ## License
 
