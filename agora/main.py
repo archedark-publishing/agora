@@ -35,6 +35,10 @@ from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
 
 settings = get_settings()
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 started_at_monotonic = monotonic()
 RATE_LIMIT_WINDOW_SECONDS = 3600
@@ -42,10 +46,18 @@ rate_limiter = SlidingWindowRateLimiter()
 recovery_logger = logging.getLogger("agora.recovery")
 health_logger = logging.getLogger("agora.health")
 registry_logger = logging.getLogger("agora.registry")
+request_logger = logging.getLogger("agora.request")
 query_tracker = QueryTracker()
 health_task: asyncio.Task[None] | None = None
 registry_task: asyncio.Task[None] | None = None
 latest_registry_snapshot: dict[str, Any] | None = None
+request_metrics: dict[str, int] = {}
+last_health_summary: dict[str, int] = {
+    "checked_count": 0,
+    "healthy_count": 0,
+    "unhealthy_count": 0,
+    "skipped_count": 0,
+}
 
 
 def _track_agent_query(agent_id: UUID) -> None:
@@ -67,6 +79,14 @@ async def _health_checker_loop() -> None:
                 summary.healthy_count,
                 summary.unhealthy_count,
                 summary.skipped_count,
+            )
+            last_health_summary.update(
+                {
+                    "checked_count": summary.checked_count,
+                    "healthy_count": summary.healthy_count,
+                    "unhealthy_count": summary.unhealthy_count,
+                    "skipped_count": summary.skipped_count,
+                }
             )
         except Exception as exc:  # pragma: no cover - defensive background safety
             health_logger.exception("health_cycle_failed error=%s", exc)
@@ -95,6 +115,38 @@ async def startup_event() -> None:
     global health_task, registry_task
     health_task = asyncio.create_task(_health_checker_loop())
     registry_task = asyncio.create_task(_registry_refresh_loop())
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next: Any) -> Response:
+    started = monotonic()
+    path = request.url.path
+    method = request.method
+    try:
+        response = await call_next(request)
+    except Exception:
+        latency_ms = int((monotonic() - started) * 1000)
+        request_logger.exception(
+            "request method=%s path=%s status=%s latency_ms=%s",
+            method,
+            path,
+            500,
+            latency_ms,
+        )
+        request_metrics[f"{method} {path} 500"] = request_metrics.get(f"{method} {path} 500", 0) + 1
+        raise
+
+    latency_ms = int((monotonic() - started) * 1000)
+    request_logger.info(
+        "request method=%s path=%s status=%s latency_ms=%s",
+        method,
+        path,
+        response.status_code,
+        latency_ms,
+    )
+    key = f"{method} {path} {response.status_code}"
+    request_metrics[key] = request_metrics.get(key, 0) + 1
+    return response
 
 
 @app.on_event("shutdown")
@@ -772,6 +824,14 @@ async def registry_export(request: Request) -> JSONResponse:
             "Last-Modified": format_datetime(generated_dt, usegmt=True),
         },
     )
+
+
+@app.get("/api/v1/metrics", tags=["observability"])
+async def metrics() -> dict[str, Any]:
+    return {
+        "request_metrics": request_metrics,
+        "health_summary": last_health_summary,
+    }
 
 
 @app.get("/api/v1/health/db", tags=["health"])
