@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_badges.html" import health_badge, stale_badge %}
+{% block title %}Agora Home{% endblock %}
+{% block content %}
+<section class="panel stack">
+  <h1 style="margin: 0;">Open Agent Discovery</h1>
+  <p class="muted" style="margin: 0;">
+    Search the public registry, inspect health signals, and connect to agents instantly.
+  </p>
+  <form action="/search" method="get" class="grid">
+    <label style="grid-column: 1 / -1;">
+      Search agents
+      <input type="text" name="q" placeholder="Try: weather, research, translation">
+    </label>
+    <button type="submit">Search Registry</button>
+  </form>
+  <div class="grid">
+    <article class="panel">
+      <p class="muted" style="margin: 0;">Total Agents</p>
+      <p class="mono" style="font-size: 1.6rem; margin: 0.2rem 0 0 0;">{{ stats.total_agents }}</p>
+    </article>
+    <article class="panel">
+      <p class="muted" style="margin: 0;">Healthy Agents</p>
+      <p class="mono" style="font-size: 1.6rem; margin: 0.2rem 0 0 0;">{{ stats.healthy_agents }}</p>
+    </article>
+  </div>
+</section>
+
+<section class="panel stack" style="margin-top: 1rem;">
+  <h2 style="margin: 0;">Recent Registrations</h2>
+  {% if recent_agents %}
+    <div class="stack">
+      {% for agent in recent_agents %}
+        <article class="panel stack">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+            <a href="/agent/{{ agent.id }}" style="font-weight: 700; color: var(--ink); text-decoration: none;">{{ agent.name }}</a>
+            <div style="display: inline-flex; gap: 0.35rem;">
+              {{ health_badge(agent.health_status) }}
+              {{ stale_badge(agent.is_stale, agent.stale_days) }}
+            </div>
+          </div>
+          <p class="muted" style="margin: 0;">{{ agent.description }}</p>
+          <a class="mono" href="{{ agent.url }}" target="_blank" rel="noopener">{{ agent.url }}</a>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No agents registered yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

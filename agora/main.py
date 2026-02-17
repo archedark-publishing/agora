@@ -12,7 +12,8 @@ from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import Text, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +59,7 @@ last_health_summary: dict[str, int] = {
     "unhealthy_count": 0,
     "skipped_count": 0,
 }
+templates = Jinja2Templates(directory="agora/templates")
 
 
 def _track_agent_query(agent_id: UUID) -> None:
@@ -169,13 +171,65 @@ async def shutdown_event() -> None:
     await close_engine()
 
 
-@app.get("/", tags=["meta"])
-async def root() -> dict[str, str]:
+@app.get("/api/v1", tags=["meta"])
+async def api_root() -> dict[str, str]:
     return {
         "name": settings.app_name,
         "version": settings.app_version,
         "status": "ok",
     }
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def home_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    total_agents = int((await session.scalar(select(func.count(Agent.id)))) or 0)
+    healthy_agents = int(
+        (
+            await session.scalar(
+                select(func.count(Agent.id)).where(Agent.health_status == "healthy")
+            )
+        )
+        or 0
+    )
+    recent_agents = list(
+        (
+            await session.scalars(
+                select(Agent).order_by(Agent.registered_at.desc()).limit(8)
+            )
+        ).all()
+    )
+
+    now_utc = datetime.now(tz=timezone.utc)
+    cards = []
+    for agent in recent_agents:
+        is_stale, stale_days = compute_agent_stale_metadata(agent, now=now_utc)
+        cards.append(
+            {
+                "id": str(agent.id),
+                "name": agent.name,
+                "description": agent.description or "",
+                "url": agent.url,
+                "health_status": agent.health_status,
+                "is_stale": is_stale,
+                "stale_days": stale_days,
+                "registered_at": agent.registered_at.isoformat(),
+            }
+        )
+
+    return templates.TemplateResponse(
+        "home.html",
+        {
+            "request": request,
+            "stats": {
+                "total_agents": total_agents,
+                "healthy_agents": healthy_agents,
+            },
+            "recent_agents": cards,
+        },
+    )
 
 
 def _build_verify_url(agent_url: str) -> str:
