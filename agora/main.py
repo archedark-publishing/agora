@@ -1,6 +1,7 @@
 """FastAPI entrypoint for Agora."""
 
 import asyncio
+import json
 import logging
 from email.utils import format_datetime
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from time import monotonic
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Text, case, cast, func, not_, or_, select
@@ -306,6 +307,75 @@ async def agent_detail_page(
             "request": request,
             "detail": detail,
         },
+    )
+
+
+@app.get("/register", response_class=HTMLResponse, include_in_schema=False)
+async def register_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "register.html",
+        {
+            "request": request,
+            "agent_card_json": "",
+            "api_key_value": "",
+            "error_message": None,
+            "success_result": None,
+        },
+    )
+
+
+@app.post("/register", response_class=HTMLResponse, include_in_schema=False)
+async def register_submit_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    agent_card_json: str = Form(...),
+    api_key: str = Form(...),
+) -> HTMLResponse:
+    try:
+        payload = json.loads(agent_card_json)
+    except json.JSONDecodeError as exc:
+        return templates.TemplateResponse(
+            "register.html",
+            {
+                "request": request,
+                "agent_card_json": agent_card_json,
+                "api_key_value": api_key,
+                "error_message": f"Invalid JSON: {exc}",
+                "success_result": None,
+            },
+            status_code=400,
+        )
+
+    try:
+        result = await register_agent(
+            agent_card_payload=payload,
+            request=request,
+            session=session,
+            api_key=api_key,
+        )
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            "register.html",
+            {
+                "request": request,
+                "agent_card_json": agent_card_json,
+                "api_key_value": api_key,
+                "error_message": exc.detail,
+                "success_result": None,
+            },
+            status_code=exc.status_code,
+        )
+
+    return templates.TemplateResponse(
+        "register.html",
+        {
+            "request": request,
+            "agent_card_json": agent_card_json,
+            "api_key_value": api_key,
+            "error_message": None,
+            "success_result": result,
+        },
+        status_code=201,
     )
 
 

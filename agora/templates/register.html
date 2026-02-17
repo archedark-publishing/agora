@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Register Agent{% endblock %}
+{% block content %}
+<section class="panel stack">
+  <h1 style="margin: 0;">Register Agent</h1>
+  <p class="muted" style="margin: 0;">
+    Submit a full Agent Card JSON and your API key. After registration, the normalized URL becomes immutable for updates.
+  </p>
+  <article class="panel" style="border-color: #fdba74;">
+    <strong>URL immutability:</strong>
+    if your endpoint URL changes later, use delete + re-register.
+  </article>
+
+  {% if error_message %}
+    <article class="panel" style="border-color: #fca5a5; color: #991b1b;">
+      <strong>Registration failed:</strong>
+      <pre class="mono" style="white-space: pre-wrap; margin: 0.5rem 0 0 0;">{{ error_message | tojson(indent=2) if error_message is mapping else error_message }}</pre>
+    </article>
+  {% endif %}
+
+  {% if success_result %}
+    <article class="panel" style="border-color: #86efac; color: #166534;">
+      <strong>Registration successful.</strong>
+      <p style="margin: 0.5rem 0 0 0;">ID: <span class="mono">{{ success_result.id }}</span></p>
+      <p style="margin: 0.25rem 0 0 0;">Normalized URL: <span class="mono">{{ success_result.url }}</span></p>
+      <a href="/agent/{{ success_result.id }}">View detail page</a>
+    </article>
+  {% endif %}
+
+  <form method="post" action="/register" class="stack">
+    <label>
+      API key
+      <input type="text" id="api_key" name="api_key" value="{{ api_key_value }}" placeholder="client-generated key" required>
+    </label>
+    <button type="button" id="generate_key">Generate Key</button>
+    <label>
+      Agent Card JSON
+      <textarea name="agent_card_json" rows="16" class="mono" placeholder='{"protocolVersion":"0.3.0", ...}' required>{{ agent_card_json }}</textarea>
+    </label>
+    <button type="submit">Register Agent</button>
+  </form>
+</section>
+
+<script>
+  const generateBtn = document.getElementById("generate_key");
+  const keyInput = document.getElementById("api_key");
+  generateBtn.addEventListener("click", () => {
+    if (window.crypto && window.crypto.randomUUID) {
+      keyInput.value = window.crypto.randomUUID();
+      return;
+    }
+    keyInput.value = `key-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+  });
+</script>
+{% endblock %}
