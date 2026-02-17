@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agora.models import Agent
 from agora.query_tracker import QueryTracker
+from agora.url_safety import URLSafetyError, assert_url_safe_for_outbound
 from agora.validation import AgentCardValidationError, validate_agent_card
 
 
@@ -39,7 +40,13 @@ def build_agent_card_probe_url(agent_url: str) -> str:
     return f"{scheme}://{host}{port_fragment}/.well-known/agent-card.json"
 
 
-async def _check_single_agent(agent: Agent, client: httpx.AsyncClient, now_utc: datetime) -> bool:
+async def _check_single_agent(
+    agent: Agent,
+    client: httpx.AsyncClient,
+    now_utc: datetime,
+    *,
+    allow_private_network_targets: bool,
+) -> bool:
     """
     Check a single agent and persist health fields.
 
@@ -50,11 +57,15 @@ async def _check_single_agent(agent: Agent, client: httpx.AsyncClient, now_utc: 
     probe_url = build_agent_card_probe_url(agent.url)
     previous_last_healthy = agent.last_healthy_at
     try:
+        assert_url_safe_for_outbound(
+            probe_url,
+            allow_private=allow_private_network_targets,
+        )
         response = await client.get(probe_url, follow_redirects=False)
         response.raise_for_status()
         payload = response.json()
         validate_agent_card(payload)
-    except (httpx.HTTPError, ValueError, AgentCardValidationError):
+    except (httpx.HTTPError, ValueError, AgentCardValidationError, URLSafetyError):
         agent.health_status = "unhealthy"
         agent.last_health_check = now_utc
         agent.last_healthy_at = previous_last_healthy
@@ -71,6 +82,7 @@ async def run_health_check_cycle(
     query_tracker: QueryTracker,
     *,
     timeout_seconds: int = 10,
+    allow_private_network_targets: bool = False,
 ) -> HealthCheckSummary:
     """Run one selective health-check cycle over recently queried agents."""
 
@@ -89,7 +101,12 @@ async def run_health_check_cycle(
         async with httpx.AsyncClient(timeout=timeout) as client:
             for agent in agents:
                 summary.checked_count += 1
-                healthy = await _check_single_agent(agent, client, now_utc)
+                healthy = await _check_single_agent(
+                    agent,
+                    client,
+                    now_utc,
+                    allow_private_network_targets=allow_private_network_targets,
+                )
                 if healthy:
                     summary.healthy_count += 1
                 else:

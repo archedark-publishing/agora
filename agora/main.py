@@ -26,6 +26,11 @@ from agora.rate_limit import SlidingWindowRateLimiter
 from agora.registry_export import build_registry_snapshot
 from agora.security import hash_api_key, verify_api_key
 from agora.stale import compute_agent_stale_metadata, stale_filter_expression
+from agora.url_safety import (
+    URLSafetyError,
+    assert_url_safe_for_outbound,
+    assert_url_safe_for_registration,
+)
 from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
 
@@ -54,6 +59,7 @@ async def _health_checker_loop() -> None:
                 AsyncSessionLocal,
                 query_tracker,
                 timeout_seconds=settings.outbound_http_timeout_seconds,
+                allow_private_network_targets=settings.allow_private_network_targets,
             )
             health_logger.info(
                 "health_cycle checked=%s healthy=%s unhealthy=%s skipped=%s",
@@ -246,6 +252,25 @@ async def register_agent(
                 ],
             },
         ) from exc
+    try:
+        assert_url_safe_for_registration(
+            normalized_url,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "url",
+                        "message": str(exc),
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
 
     existing_agent_id = await session.scalar(
         select(Agent.id).where(Agent.url == normalized_url).limit(1)
@@ -367,6 +392,10 @@ async def complete_recovery(
 
     verify_url = _build_verify_url(agent.url)
     try:
+        assert_url_safe_for_outbound(
+            verify_url,
+            allow_private=settings.allow_private_network_targets,
+        )
         fetched_token = await _fetch_recovery_token(verify_url)
     except httpx.HTTPError as exc:
         recovery_logger.info(
@@ -377,6 +406,16 @@ async def complete_recovery(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Recovery verification endpoint unreachable or invalid",
+        ) from exc
+    except URLSafetyError as exc:
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=unsafe_target",
+            agent_id,
+            _client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
 
     if not verify_api_key(fetched_token, agent.recovery_challenge_hash):
@@ -465,6 +504,25 @@ async def update_agent(
     try:
         normalized_url = normalize_url(str(validated.card.url))
     except URLNormalizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "url",
+                        "message": str(exc),
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
+    try:
+        assert_url_safe_for_registration(
+            normalized_url,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={

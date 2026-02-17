@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     outbound_http_timeout_seconds: int = 10
     registry_refresh_interval: int = 3600
     admin_api_token: str | None = None
+    allow_private_network_targets: bool = False
     monthly_budget_cents: int | None = None
 
     model_config = SettingsConfigDict(
