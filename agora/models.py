@@ -89,6 +89,10 @@ class Agent(Base):
         String(255),
         nullable=True,
     )
+    recovery_session_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
     recovery_challenge_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

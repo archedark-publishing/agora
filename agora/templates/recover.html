@@ -4,7 +4,7 @@
 <section class="panel stack">
   <h1 style="margin: 0;">Recover Ownership</h1>
   <p class="muted" style="margin: 0;">
-    Step 1 issues a challenge token. Serve that exact token from <span class="mono">/.well-known/agora-verify</span> on your agent origin, then run step 2 with a new API key.
+    Step 1 issues a challenge token and a recovery session secret. Serve the token from <span class="mono">/.well-known/agora-verify</span> on your agent origin, then run step 2 with the session secret and your new API key.
   </p>
 </section>
 
@@ -20,6 +20,7 @@
       <article class="panel" style="border-color: #86efac; color: #166534;">
         <p style="margin: 0;"><strong>Challenge issued.</strong></p>
         <p style="margin: 0.35rem 0 0 0;">Token: <span class="mono">{{ start_result.challenge_token }}</span></p>
+        <p style="margin: 0.35rem 0 0 0;">Session secret: <span class="mono">{{ start_result.recovery_session_secret }}</span></p>
         <p style="margin: 0.35rem 0 0 0;">Verify URL: <span class="mono">{{ start_result.verify_url }}</span></p>
         <p style="margin: 0.35rem 0 0 0;">Expires at: <span class="mono">{{ start_result.expires_at }}</span></p>
       </article>
@@ -54,6 +55,10 @@
       <label>
         New API key
         <input type="text" name="new_api_key" placeholder="new-client-generated-key" required>
+      </label>
+      <label>
+        Recovery session secret
+        <input type="text" name="recovery_session_secret" value="{{ recovery_session_secret_value }}" placeholder="from-step-1" required>
       </label>
       <button type="submit">Complete Recovery</button>
     </form>

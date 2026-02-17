@@ -42,3 +42,15 @@ def test_validate_agent_card_requires_skills() -> None:
         assert any(error["field"] == "skills" for error in exc.errors)
         return
     assert False, "Expected AgentCardValidationError when skills are missing"
+
+
+def test_validate_agent_card_rejects_oversized_name() -> None:
+    payload = _valid_payload()
+    payload["name"] = "n" * 5000
+
+    try:
+        validate_agent_card(payload)
+    except AgentCardValidationError as exc:
+        assert any(error["field"] == "name" for error in exc.errors)
+        return
+    assert False, "Expected AgentCardValidationError for oversized name"

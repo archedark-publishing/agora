@@ -11,7 +11,7 @@ settings = get_settings()
 
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.environment.lower() == "development",
+    echo=settings.database_echo_sql,
     pool_pre_ping=True,
 )
 

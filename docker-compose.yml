@@ -3,25 +3,25 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: agora
-      POSTGRES_USER: agora
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ${POSTGRES_DB:-agora}
+      POSTGRES_USER: ${POSTGRES_USER:-agora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agora -d agora"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-agora} -d ${POSTGRES_DB:-agora}",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redisdata:/data
 
@@ -34,11 +34,13 @@ services:
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql+asyncpg://agora:password@db:5432/agora
-      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agora}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-agora}
+      DATABASE_ECHO_SQL: "false"
+      ENVIRONMENT: production
       LOG_LEVEL: INFO
+      MAX_REQUEST_BODY_BYTES: 1048576
       RATE_LIMIT_BACKEND: redis
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?ADMIN_API_TOKEN is required}
     ports:
       - "8000:8000"

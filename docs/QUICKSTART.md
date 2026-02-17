@@ -13,6 +13,8 @@ Use whichever Compose command your machine supports:
 
 ```bash
 export ADMIN_API_TOKEN="$(openssl rand -hex 24)"
+export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+export REDIS_PASSWORD="$(openssl rand -hex 24)"
 docker compose up --build
 # or
 docker-compose up --build

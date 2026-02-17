@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+MAX_AGENT_NAME_LENGTH = 255
+MAX_AGENT_DESCRIPTION_LENGTH = 4000
+MAX_AGENT_URL_LENGTH = 2048
+MAX_AGENT_VERSION_LENGTH = 50
+MAX_PROTOCOL_VERSION_LENGTH = 20
+MAX_SKILL_ID_LENGTH = 255
+MAX_SKILL_NAME_LENGTH = 255
+MAX_SKILL_DESCRIPTION_LENGTH = 2000
 
 
 class SkillCard(BaseModel):
@@ -13,9 +22,9 @@ class SkillCard(BaseModel):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True, str_strip_whitespace=True)
 
-    id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    description: str | None = None
+    id: str = Field(min_length=1, max_length=MAX_SKILL_ID_LENGTH)
+    name: str = Field(min_length=1, max_length=MAX_SKILL_NAME_LENGTH)
+    description: str | None = Field(default=None, max_length=MAX_SKILL_DESCRIPTION_LENGTH)
     tags: list[str] = Field(default_factory=list)
     input_modes: list[str] = Field(default_factory=list, alias="inputModes")
     output_modes: list[str] = Field(default_factory=list, alias="outputModes")
@@ -27,16 +36,27 @@ class AgentCard(BaseModel):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True, str_strip_whitespace=True)
 
-    protocol_version: str = Field(alias="protocolVersion", pattern=r"^\d+\.\d+\.\d+$")
-    name: str = Field(min_length=1)
-    description: str | None = None
-    url: AnyHttpUrl
-    version: str | None = None
+    protocol_version: str = Field(
+        alias="protocolVersion",
+        pattern=r"^\d+\.\d+\.\d+$",
+        max_length=MAX_PROTOCOL_VERSION_LENGTH,
+    )
+    name: str = Field(min_length=1, max_length=MAX_AGENT_NAME_LENGTH)
+    description: str | None = Field(default=None, max_length=MAX_AGENT_DESCRIPTION_LENGTH)
+    url: Annotated[AnyHttpUrl, Field(max_length=MAX_AGENT_URL_LENGTH)]
+    version: str | None = Field(default=None, max_length=MAX_AGENT_VERSION_LENGTH)
     capabilities: dict[str, bool] = Field(default_factory=dict)
     skills: list[SkillCard] = Field(min_length=1)
     default_input_modes: list[str] = Field(default_factory=list, alias="defaultInputModes")
     default_output_modes: list[str] = Field(default_factory=list, alias="defaultOutputModes")
     authentication: dict[str, Any] | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url_length(cls, value: AnyHttpUrl) -> AnyHttpUrl:
+        if len(str(value)) > MAX_AGENT_URL_LENGTH:
+            raise ValueError(f"String should have at most {MAX_AGENT_URL_LENGTH} characters")
+        return value
 
 
 @dataclass(slots=True)

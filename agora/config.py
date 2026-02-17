@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://agora:password@localhost:5432/agora"
+    database_echo_sql: bool = False
+    max_request_body_bytes: int = 1_048_576
     health_check_interval: int = 3600
     recovery_challenge_ttl_seconds: int = 900
     outbound_http_timeout_seconds: int = 10
@@ -27,6 +29,11 @@ class Settings(BaseSettings):
     registration_rate_limit_per_ip: int = 10
     registration_rate_limit_per_api_key: int = 10
     registration_rate_limit_global: int = 200
+    list_agents_rate_limit_per_ip: int = 100
+    list_agents_rate_limit_per_api_key: int = 1000
+    list_agents_rate_limit_global: int = 5000
+    admin_rate_limit_per_ip: int = 30
+    admin_rate_limit_global: int = 300
     monthly_budget_cents: int | None = None
 
     model_config = SettingsConfigDict(

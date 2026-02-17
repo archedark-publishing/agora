@@ -141,3 +141,60 @@ async def test_legacy_owner_hash_is_upgraded_on_successful_auth(client) -> None:
         assert agent is not None
         assert agent.owner_key_hash != legacy_hash
         assert str(agent.owner_key_hash).startswith("$argon2id$")
+
+
+async def test_list_agents_rate_limit_blocks_rotating_api_keys(client, monkeypatch) -> None:
+    monkeypatch.setattr(main_module.settings, "list_agents_rate_limit_per_ip", 3)
+    monkeypatch.setattr(main_module.settings, "list_agents_rate_limit_per_api_key", 100)
+    monkeypatch.setattr(main_module.settings, "list_agents_rate_limit_global", 100)
+
+    statuses: list[int] = []
+    for idx in range(1, 6):
+        response = await client.get(
+            "/api/v1/agents",
+            headers={"X-API-Key": f"rotating-list-key-{idx}"},
+        )
+        statuses.append(response.status_code)
+
+    assert statuses[:3] == [200, 200, 200]
+    assert statuses[3] == 429
+    assert statuses[4] == 429
+
+
+async def test_admin_endpoints_are_rate_limited_before_auth(client, monkeypatch) -> None:
+    monkeypatch.setattr(main_module.settings, "admin_api_token", "test-admin-token")
+    monkeypatch.setattr(main_module.settings, "admin_rate_limit_per_ip", 2)
+    monkeypatch.setattr(main_module.settings, "admin_rate_limit_global", 100)
+
+    first = await client.get("/api/v1/metrics", headers={"X-Admin-Token": "wrong-token"})
+    second = await client.get("/api/v1/metrics", headers={"X-Admin-Token": "wrong-token"})
+    third = await client.get("/api/v1/metrics", headers={"X-Admin-Token": "wrong-token"})
+
+    assert first.status_code == 401
+    assert second.status_code == 401
+    assert third.status_code == 429
+
+
+async def test_registration_rejects_oversized_name_with_400(client) -> None:
+    response = await client.post(
+        "/api/v1/agents",
+        json=payload("a" * 5000, "https://example.com/oversized-name"),
+        headers={"X-API-Key": "oversized-key"},
+    )
+    assert response.status_code == 400
+    errors = response.json()["detail"]["errors"]
+    assert any(error["field"] == "name" for error in errors)
+
+
+async def test_request_size_limit_blocks_large_payloads(client, monkeypatch) -> None:
+    monkeypatch.setattr(main_module.settings, "max_request_body_bytes", 128)
+
+    response = await client.post(
+        "/api/v1/agents",
+        content=("x" * 256),
+        headers={
+            "Content-Type": "application/json",
+            "X-API-Key": "size-limit-key",
+        },
+    )
+    assert response.status_code == 413
