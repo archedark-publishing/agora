@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     health_check_interval: int = 3600
     recovery_challenge_ttl_seconds: int = 900
     outbound_http_timeout_seconds: int = 10
+    registry_refresh_interval: int = 3600
     admin_api_token: str | None = None
     monthly_budget_cents: int | None = None
 

@@ -11,6 +11,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import Text, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from agora.health_checker import run_health_check_cycle
 from agora.models import Agent
 from agora.query_tracker import QueryTracker
 from agora.rate_limit import SlidingWindowRateLimiter
+from agora.registry_export import build_registry_snapshot
 from agora.security import hash_api_key, verify_api_key
 from agora.stale import compute_agent_stale_metadata, stale_filter_expression
 from agora.url_normalization import URLNormalizationError, normalize_url
@@ -33,8 +35,11 @@ RATE_LIMIT_WINDOW_SECONDS = 3600
 rate_limiter = SlidingWindowRateLimiter()
 recovery_logger = logging.getLogger("agora.recovery")
 health_logger = logging.getLogger("agora.health")
+registry_logger = logging.getLogger("agora.registry")
 query_tracker = QueryTracker()
 health_task: asyncio.Task[None] | None = None
+registry_task: asyncio.Task[None] | None = None
+latest_registry_snapshot: dict[str, Any] | None = None
 
 
 def _track_agent_query(agent_id: UUID) -> None:
@@ -62,15 +67,32 @@ async def _health_checker_loop() -> None:
         await asyncio.sleep(settings.health_check_interval)
 
 
+async def _registry_refresh_loop() -> None:
+    global latest_registry_snapshot
+    while True:
+        try:
+            latest_registry_snapshot = await build_registry_snapshot(AsyncSessionLocal)
+            registry_logger.info(
+                "registry_snapshot_refreshed agents_count=%s generated_at=%s",
+                latest_registry_snapshot["agents_count"],
+                latest_registry_snapshot["generated_at"],
+            )
+        except Exception as exc:  # pragma: no cover - defensive background safety
+            registry_logger.exception("registry_snapshot_failed error=%s", exc)
+
+        await asyncio.sleep(settings.registry_refresh_interval)
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
-    global health_task
+    global health_task, registry_task
     health_task = asyncio.create_task(_health_checker_loop())
+    registry_task = asyncio.create_task(_registry_refresh_loop())
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    global health_task
+    global health_task, registry_task
     if health_task:
         health_task.cancel()
         try:
@@ -78,6 +100,13 @@ async def shutdown_event() -> None:
         except asyncio.CancelledError:
             pass
         health_task = None
+    if registry_task:
+        registry_task.cancel()
+        try:
+            await registry_task
+        except asyncio.CancelledError:
+            pass
+        registry_task = None
     await close_engine()
 
 
@@ -611,6 +640,18 @@ async def delete_agent(
     await session.delete(agent)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/v1/registry.json", tags=["registry"])
+async def registry_export() -> JSONResponse:
+    global latest_registry_snapshot
+    if latest_registry_snapshot is None:
+        latest_registry_snapshot = await build_registry_snapshot(AsyncSessionLocal)
+
+    return JSONResponse(
+        content=latest_registry_snapshot,
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 @app.get("/api/v1/health/db", tags=["health"])
