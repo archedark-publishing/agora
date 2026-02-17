@@ -1,5 +1,6 @@
 """FastAPI entrypoint for Agora."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
@@ -15,8 +16,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agora.config import get_settings
-from agora.database import close_engine, get_db_session, run_health_query
+from agora.database import AsyncSessionLocal, close_engine, get_db_session, run_health_query
+from agora.health_checker import run_health_check_cycle
 from agora.models import Agent
+from agora.query_tracker import QueryTracker
 from agora.rate_limit import SlidingWindowRateLimiter
 from agora.security import hash_api_key, verify_api_key
 from agora.url_normalization import URLNormalizationError, normalize_url
@@ -29,10 +32,52 @@ STALE_THRESHOLD_DAYS = 7
 RATE_LIMIT_WINDOW_SECONDS = 3600
 rate_limiter = SlidingWindowRateLimiter()
 recovery_logger = logging.getLogger("agora.recovery")
+health_logger = logging.getLogger("agora.health")
+query_tracker = QueryTracker()
+health_task: asyncio.Task[None] | None = None
+
+
+def _track_agent_query(agent_id: UUID) -> None:
+    query_tracker.mark(agent_id)
+
+
+async def _health_checker_loop() -> None:
+    while True:
+        try:
+            summary = await run_health_check_cycle(
+                AsyncSessionLocal,
+                query_tracker,
+                timeout_seconds=settings.outbound_http_timeout_seconds,
+            )
+            health_logger.info(
+                "health_cycle checked=%s healthy=%s unhealthy=%s skipped=%s",
+                summary.checked_count,
+                summary.healthy_count,
+                summary.unhealthy_count,
+                summary.skipped_count,
+            )
+        except Exception as exc:  # pragma: no cover - defensive background safety
+            health_logger.exception("health_cycle_failed error=%s", exc)
+
+        await asyncio.sleep(settings.health_check_interval)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    global health_task
+    health_task = asyncio.create_task(_health_checker_loop())
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    global health_task
+    if health_task:
+        health_task.cancel()
+        try:
+            await health_task
+        except asyncio.CancelledError:
+            pass
+        health_task = None
     await close_engine()
 
 
@@ -341,6 +386,7 @@ async def get_agent_detail(
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
+    _track_agent_query(agent.id)
     is_stale, stale_days = _compute_stale_metadata(agent)
     return {
         "id": str(agent.id),
@@ -497,6 +543,8 @@ async def list_agents(
         .offset(offset)
     )
     agents = list((await session.scalars(ordered_query)).all())
+    for agent in agents:
+        _track_agent_query(agent.id)
 
     response_agents: list[dict[str, Any]] = []
     for agent in agents:
