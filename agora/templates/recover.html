@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Recover Ownership{% endblock %}
+{% block content %}
+<section class="panel stack">
+  <h1 style="margin: 0;">Recover Ownership</h1>
+  <p class="muted" style="margin: 0;">
+    Step 1 issues a challenge token. Serve that exact token from <span class="mono">/.well-known/agora-verify</span> on your agent origin, then run step 2 with a new API key.
+  </p>
+</section>
+
+<section class="grid" style="margin-top: 1rem;">
+  <article class="panel stack">
+    <h2 style="margin: 0;">Step 1: Start Challenge</h2>
+    {% if start_error %}
+      <article class="panel" style="border-color: #fca5a5; color: #991b1b;">
+        <strong>Start failed:</strong> {{ start_error }}
+      </article>
+    {% endif %}
+    {% if start_result %}
+      <article class="panel" style="border-color: #86efac; color: #166534;">
+        <p style="margin: 0;"><strong>Challenge issued.</strong></p>
+        <p style="margin: 0.35rem 0 0 0;">Token: <span class="mono">{{ start_result.challenge_token }}</span></p>
+        <p style="margin: 0.35rem 0 0 0;">Verify URL: <span class="mono">{{ start_result.verify_url }}</span></p>
+        <p style="margin: 0.35rem 0 0 0;">Expires at: <span class="mono">{{ start_result.expires_at }}</span></p>
+      </article>
+    {% endif %}
+    <form method="post" action="/recover/start" class="stack">
+      <label>
+        Agent ID
+        <input type="text" name="agent_id" value="{{ agent_id_value }}" placeholder="uuid" required>
+      </label>
+      <button type="submit">Start Recovery</button>
+    </form>
+  </article>
+
+  <article class="panel stack">
+    <h2 style="margin: 0;">Step 2: Complete Rotation</h2>
+    {% if complete_error %}
+      <article class="panel" style="border-color: #fca5a5; color: #991b1b;">
+        <strong>Complete failed:</strong> {{ complete_error }}
+      </article>
+    {% endif %}
+    {% if complete_result %}
+      <article class="panel" style="border-color: #86efac; color: #166534;">
+        <p style="margin: 0;"><strong>Recovery complete.</strong></p>
+        <p style="margin: 0.35rem 0 0 0;">{{ complete_result.message }}</p>
+      </article>
+    {% endif %}
+    <form method="post" action="/recover/complete" class="stack">
+      <label>
+        Agent ID
+        <input type="text" name="agent_id" value="{{ agent_id_value }}" placeholder="uuid" required>
+      </label>
+      <label>
+        New API key
+        <input type="text" name="new_api_key" placeholder="new-client-generated-key" required>
+      </label>
+      <button type="submit">Complete Recovery</button>
+    </form>
+  </article>
+</section>
+{% endblock %}

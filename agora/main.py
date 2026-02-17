@@ -379,6 +379,131 @@ async def register_submit_page(
     )
 
 
+@app.get("/recover", response_class=HTMLResponse, include_in_schema=False)
+async def recover_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "recover.html",
+        {
+            "request": request,
+            "start_error": None,
+            "complete_error": None,
+            "start_result": None,
+            "complete_result": None,
+            "agent_id_value": "",
+        },
+    )
+
+
+@app.post("/recover/start", response_class=HTMLResponse, include_in_schema=False)
+async def recover_start_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    agent_id: str = Form(...),
+) -> HTMLResponse:
+    try:
+        parsed_id = UUID(agent_id)
+    except ValueError:
+        return templates.TemplateResponse(
+            "recover.html",
+            {
+                "request": request,
+                "start_error": "Invalid agent ID format",
+                "complete_error": None,
+                "start_result": None,
+                "complete_result": None,
+                "agent_id_value": agent_id,
+            },
+            status_code=400,
+        )
+
+    try:
+        result = await start_recovery(agent_id=parsed_id, request=request, session=session)
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            "recover.html",
+            {
+                "request": request,
+                "start_error": exc.detail,
+                "complete_error": None,
+                "start_result": None,
+                "complete_result": None,
+                "agent_id_value": agent_id,
+            },
+            status_code=exc.status_code,
+        )
+
+    return templates.TemplateResponse(
+        "recover.html",
+        {
+            "request": request,
+            "start_error": None,
+            "complete_error": None,
+            "start_result": result,
+            "complete_result": None,
+            "agent_id_value": agent_id,
+        },
+        status_code=200,
+    )
+
+
+@app.post("/recover/complete", response_class=HTMLResponse, include_in_schema=False)
+async def recover_complete_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    agent_id: str = Form(...),
+    new_api_key: str = Form(...),
+) -> HTMLResponse:
+    try:
+        parsed_id = UUID(agent_id)
+    except ValueError:
+        return templates.TemplateResponse(
+            "recover.html",
+            {
+                "request": request,
+                "start_error": None,
+                "complete_error": "Invalid agent ID format",
+                "start_result": None,
+                "complete_result": None,
+                "agent_id_value": agent_id,
+            },
+            status_code=400,
+        )
+
+    try:
+        result = await complete_recovery(
+            agent_id=parsed_id,
+            request=request,
+            session=session,
+            api_key=new_api_key,
+        )
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            "recover.html",
+            {
+                "request": request,
+                "start_error": None,
+                "complete_error": exc.detail,
+                "start_result": None,
+                "complete_result": None,
+                "agent_id_value": agent_id,
+            },
+            status_code=exc.status_code,
+        )
+
+    return templates.TemplateResponse(
+        "recover.html",
+        {
+            "request": request,
+            "start_error": None,
+            "complete_error": None,
+            "start_result": None,
+            "complete_result": result,
+            "agent_id_value": agent_id,
+        },
+        status_code=200,
+    )
+
+
 def _build_verify_url(agent_url: str) -> str:
     """Return the recovery verification URL for an agent origin."""
 
