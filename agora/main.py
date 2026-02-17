@@ -551,6 +551,50 @@ async def list_agents(
     }
 
 
+@app.get("/api/v1/admin/stale-candidates", tags=["admin"])
+async def stale_candidates_report(
+    session: AsyncSession = Depends(get_db_session),
+    admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> dict[str, Any]:
+    if settings.admin_api_token is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not configured")
+    if admin_token != settings.admin_api_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
+
+    now_utc = datetime.now(tz=timezone.utc)
+    stale_expr = stale_filter_expression(now_utc)
+    agents = list(
+        (
+            await session.scalars(
+                select(Agent).where(stale_expr).order_by(Agent.registered_at.desc())
+            )
+        ).all()
+    )
+    candidates = []
+    for agent in agents:
+        is_stale, stale_days = compute_agent_stale_metadata(agent, now=now_utc)
+        candidates.append(
+            {
+                "id": str(agent.id),
+                "name": agent.name,
+                "url": agent.url,
+                "health_status": agent.health_status,
+                "is_stale": is_stale,
+                "stale_days": stale_days,
+                "registered_at": agent.registered_at.isoformat(),
+                "last_healthy_at": (
+                    agent.last_healthy_at.isoformat() if agent.last_healthy_at else None
+                ),
+            }
+        )
+
+    return {
+        "generated_at": now_utc.isoformat(),
+        "count": len(candidates),
+        "candidates": candidates,
+    }
+
+
 @app.delete("/api/v1/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["agents"])
 async def delete_agent(
     agent_id: UUID,

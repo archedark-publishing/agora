@@ -99,5 +99,6 @@ async def run_health_check_cycle(
         if missing_count > 0:
             summary.skipped_count += missing_count
 
+        # MVP policy: stale agents are advisory only; no auto-removal occurs here.
         await session.commit()
     return summary
