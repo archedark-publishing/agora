@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+
 import httpx
 import pytest_asyncio
 from sqlalchemy import delete
@@ -11,14 +13,19 @@ from agora.models import Agent
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def clean_state() -> None:
+async def clean_state(monkeypatch) -> None:
     async with AsyncSessionLocal() as session:
         await session.execute(delete(Agent))
         await session.commit()
 
-    main_module.rate_limiter._windows.clear()
+    monkeypatch.setattr(
+        "agora.url_safety._resolve_ips",
+        lambda _hostname: [ipaddress.ip_address("93.184.216.34")],
+    )
+    await main_module.rate_limiter.reset()
     main_module.query_tracker._last_queried.clear()
     main_module.latest_registry_snapshot = None
+    main_module.request_metrics.clear()
     yield
     await close_engine()
 

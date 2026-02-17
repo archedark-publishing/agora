@@ -21,6 +21,7 @@ Production-ready MVP.
 Use either command style depending on your Docker install:
 
 ```bash
+export ADMIN_API_TOKEN="$(openssl rand -hex 24)"
 docker compose up --build
 # or
 docker-compose up --build

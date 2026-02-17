@@ -14,3 +14,12 @@ def test_normalize_url_rejects_invalid_scheme() -> None:
         assert "scheme" in str(exc)
         return
     assert False, "Expected URLNormalizationError for unsupported scheme"
+
+
+def test_normalize_url_rejects_userinfo() -> None:
+    try:
+        normalize_url("https://trusted.example.com@attacker.example.net/a2a")
+    except URLNormalizationError as exc:
+        assert "userinfo" in str(exc)
+        return
+    assert False, "Expected URLNormalizationError for URLs with userinfo"

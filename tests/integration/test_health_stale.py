@@ -24,9 +24,9 @@ async def test_stale_filter_and_unknown_behavior(client) -> None:
     # Create three agents through API.
     created_ids: list[str] = []
     for name, url in [
-        ("unknown-agent", "https://stale-unknown.example.com/a2a"),
-        ("never-healthy-stale", "https://stale-never.example.com/a2a"),
-        ("recent-unhealthy", "https://stale-recent.example.com/a2a"),
+        ("unknown-agent", "https://example.com/stale/unknown"),
+        ("never-healthy-stale", "https://example.com/stale/never"),
+        ("recent-unhealthy", "https://example.com/stale/recent"),
     ]:
         response = await client.post(
             "/api/v1/agents",

@@ -8,3 +8,9 @@ __pycache__
 .mypy_cache
 tests
 alembic/versions/__pycache__
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt

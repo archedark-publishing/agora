@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     registry_refresh_interval: int = 3600
     admin_api_token: str | None = None
     allow_private_network_targets: bool = False
+    allow_unresolvable_registration_hostnames: bool = False
+    metrics_max_entries: int = 2048
+    rate_limit_backend: str = "auto"
+    redis_url: str | None = None
+    rate_limit_prefix: str = "agora:rate_limit"
+    registration_rate_limit_per_ip: int = 10
+    registration_rate_limit_per_api_key: int = 10
+    registration_rate_limit_global: int = 200
     monthly_budget_cents: int | None = None
 
     model_config = SettingsConfigDict(

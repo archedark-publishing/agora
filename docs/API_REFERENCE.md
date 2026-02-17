@@ -63,7 +63,8 @@ Fetches verification token from `https://<agent-origin>/.well-known/agora-verify
 Serves the latest cached registry snapshot with cache headers.
 
 - `GET /api/v1/metrics`  
-In-memory request metrics and last health summary.
+Headers: `X-Admin-Token`  
+Returns bounded in-memory request metrics and last health summary when `ADMIN_API_TOKEN` is configured.
 
 - `GET /api/v1/admin/stale-candidates`  
 Headers: `X-Admin-Token`  

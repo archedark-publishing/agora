@@ -31,7 +31,12 @@ def _resolve_ips(hostname: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Ad
     return resolved
 
 
-def _validate_hostname(hostname: str | None, *, allow_private: bool) -> None:
+def _validate_hostname(
+    hostname: str | None,
+    *,
+    allow_private: bool,
+    allow_unresolvable: bool = False,
+) -> None:
     if not hostname:
         raise URLSafetyError("URL must include a hostname")
 
@@ -54,19 +59,29 @@ def _validate_hostname(hostname: str | None, *, allow_private: bool) -> None:
 
     try:
         resolved_ips = _resolve_ips(hostname)
-    except socket.gaierror:
-        # Keep behavior permissive for unresolved public hostnames at registration time.
-        return
+    except socket.gaierror as exc:
+        if allow_unresolvable:
+            return
+        raise URLSafetyError("Unable to resolve target hostname") from exc
 
     if any(_is_blocked_ip(ip) for ip in resolved_ips):
         raise URLSafetyError("Private or internal network targets are not allowed")
 
 
-def assert_url_safe_for_registration(url: str, *, allow_private: bool = False) -> None:
+def assert_url_safe_for_registration(
+    url: str,
+    *,
+    allow_private: bool = False,
+    allow_unresolvable: bool = False,
+) -> None:
     """Validate that a user-submitted URL does not target internal/private networks."""
 
     parts = urlsplit(url)
-    _validate_hostname(parts.hostname, allow_private=allow_private)
+    _validate_hostname(
+        parts.hostname,
+        allow_private=allow_private,
+        allow_unresolvable=allow_unresolvable,
+    )
 
 
 def assert_url_safe_for_outbound(url: str, *, allow_private: bool = False) -> None:
