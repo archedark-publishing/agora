@@ -232,6 +232,67 @@ async def home_page(
     )
 
 
+@app.get("/search", response_class=HTMLResponse, include_in_schema=False)
+async def search_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    q: str | None = Query(default=None),
+    skill: str | None = Query(default=None),
+    capability: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    health: str | None = Query(default=None),
+    stale: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> HTMLResponse:
+    skills = [item.strip() for item in (skill or "").split(",") if item.strip()]
+    capabilities = [item.strip() for item in (capability or "").split(",") if item.strip()]
+    tags = [item.strip() for item in (tag or "").split(",") if item.strip()]
+    health_filters = [health] if health else None
+    stale_bool: bool | None = None
+    if stale == "true":
+        stale_bool = True
+    elif stale == "false":
+        stale_bool = False
+
+    results = await list_agents(
+        request=request,
+        session=session,
+        skill=skills or None,
+        capability=capabilities or None,
+        tag=tags or None,
+        health=health_filters,
+        q=q,
+        stale=stale_bool,
+        limit=limit,
+        offset=offset,
+    )
+    has_previous = offset > 0
+    has_next = (offset + limit) < results["total"]
+
+    return templates.TemplateResponse(
+        "search.html",
+        {
+            "request": request,
+            "results": results,
+            "filters": {
+                "q": q or "",
+                "skill": skill or "",
+                "capability": capability or "",
+                "tag": tag or "",
+                "health": health or "",
+                "stale": stale or "",
+                "limit": limit,
+                "offset": offset,
+            },
+            "has_previous": has_previous,
+            "has_next": has_next,
+            "previous_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
+        },
+    )
+
+
 def _build_verify_url(agent_url: str) -> str:
     """Return the recovery verification URL for an agent origin."""
 
