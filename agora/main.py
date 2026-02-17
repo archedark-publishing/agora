@@ -11,7 +11,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from sqlalchemy import Text, and_, case, cast, func, not_, or_, select
+from sqlalchemy import Text, case, cast, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,13 +22,13 @@ from agora.models import Agent
 from agora.query_tracker import QueryTracker
 from agora.rate_limit import SlidingWindowRateLimiter
 from agora.security import hash_api_key, verify_api_key
+from agora.stale import compute_agent_stale_metadata, stale_filter_expression
 from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 started_at_monotonic = monotonic()
-STALE_THRESHOLD_DAYS = 7
 RATE_LIMIT_WINDOW_SECONDS = 3600
 rate_limiter = SlidingWindowRateLimiter()
 recovery_logger = logging.getLogger("agora.recovery")
@@ -88,28 +88,6 @@ async def root() -> dict[str, str]:
         "version": settings.app_version,
         "status": "ok",
     }
-
-
-def _compute_stale_metadata(agent: Agent, now: datetime | None = None) -> tuple[bool, int]:
-    if agent.health_status != "unhealthy":
-        return False, 0
-
-    reference = agent.last_healthy_at or agent.registered_at
-    now_utc = now or datetime.now(tz=timezone.utc)
-    elapsed = now_utc - reference
-    is_stale = elapsed > timedelta(days=STALE_THRESHOLD_DAYS)
-    return is_stale, elapsed.days if is_stale else 0
-
-
-def _stale_filter_expression(now: datetime) -> Any:
-    stale_cutoff = now - timedelta(days=STALE_THRESHOLD_DAYS)
-    return and_(
-        Agent.health_status == "unhealthy",
-        or_(
-            and_(Agent.last_healthy_at.is_not(None), Agent.last_healthy_at < stale_cutoff),
-            and_(Agent.last_healthy_at.is_(None), Agent.registered_at < stale_cutoff),
-        ),
-    )
 
 
 def _build_verify_url(agent_url: str) -> str:
@@ -387,7 +365,7 @@ async def get_agent_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
     _track_agent_query(agent.id)
-    is_stale, stale_days = _compute_stale_metadata(agent)
+    is_stale, stale_days = compute_agent_stale_metadata(agent)
     return {
         "id": str(agent.id),
         "agent_card": agent.agent_card,
@@ -516,7 +494,7 @@ async def list_agents(
         )
 
     now_utc = datetime.now(tz=timezone.utc)
-    stale_expr = _stale_filter_expression(now_utc)
+    stale_expr = stale_filter_expression(now_utc)
     if stale is True:
         filters.append(stale_expr)
     elif stale is False:
@@ -548,7 +526,7 @@ async def list_agents(
 
     response_agents: list[dict[str, Any]] = []
     for agent in agents:
-        is_stale, stale_days = _compute_stale_metadata(agent, now=now_utc)
+        is_stale, stale_days = compute_agent_stale_metadata(agent, now=now_utc)
         response_agents.append(
             {
                 "id": str(agent.id),
