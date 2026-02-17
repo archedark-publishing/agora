@@ -293,6 +293,22 @@ async def search_page(
     )
 
 
+@app.get("/agent/{agent_id}", response_class=HTMLResponse, include_in_schema=False)
+async def agent_detail_page(
+    request: Request,
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    detail = await get_agent_detail(agent_id=agent_id, session=session)
+    return templates.TemplateResponse(
+        "agent_detail.html",
+        {
+            "request": request,
+            "detail": detail,
+        },
+    )
+
+
 def _build_verify_url(agent_url: str) -> str:
     """Return the recovery verification URL for an agent origin."""
 

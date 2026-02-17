@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_badges.html" import health_badge, stale_badge %}
+{% block title %}Agent Detail{% endblock %}
+{% block content %}
+<section class="panel stack">
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+    <h1 style="margin: 0;">{{ detail.agent_card.name }}</h1>
+    <div style="display: inline-flex; gap: 0.35rem;">
+      {{ health_badge(detail.health_status) }}
+      {{ stale_badge(detail.is_stale, detail.stale_days) }}
+    </div>
+  </div>
+  <p class="muted" style="margin: 0;">{{ detail.agent_card.description or "" }}</p>
+  <a class="mono" href="{{ detail.agent_card.url }}" target="_blank" rel="noopener">{{ detail.agent_card.url }}</a>
+
+  {% if detail.is_stale %}
+    <article class="panel" style="border-color: #fdba74;">
+      <strong>Candidate for manual review:</strong>
+      this agent has been unhealthy long enough to be considered stale.
+    </article>
+  {% endif %}
+
+  <div class="grid">
+    <article class="panel">
+      <p class="muted" style="margin: 0;">Agent ID</p>
+      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.id }}</p>
+    </article>
+    <article class="panel">
+      <p class="muted" style="margin: 0;">Registered</p>
+      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.registered_at }}</p>
+    </article>
+    <article class="panel">
+      <p class="muted" style="margin: 0;">Last Health Check</p>
+      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.last_health_check or "never" }}</p>
+    </article>
+    <article class="panel">
+      <p class="muted" style="margin: 0;">Last Healthy At</p>
+      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.last_healthy_at or "never" }}</p>
+    </article>
+  </div>
+</section>
+
+<section class="panel stack" style="margin-top: 1rem;">
+  <h2 style="margin: 0;">Full Agent Card</h2>
+  <pre class="mono" style="margin: 0; white-space: pre-wrap;">{{ detail.agent_card | tojson(indent=2) }}</pre>
+</section>
+{% endblock %}
