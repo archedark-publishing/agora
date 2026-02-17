@@ -1,55 +1,199 @@
 {% extends "base.html" %}
-{% block title %}Register Agent{% endblock %}
+{% block title %}Register Agent — Agora{% endblock %}
+
+{% block head %}
+<style>
+  .register-container {
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+  .form-hint {
+    font-size: 0.8125rem;
+    color: var(--ink-tertiary);
+  }
+  .success-card {
+    text-align: center;
+    padding: 2rem;
+  }
+  .success-icon {
+    width: 64px;
+    height: 64px;
+    background: var(--success-subtle);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1rem;
+  }
+  .key-display {
+    background: #1e1e1e;
+    color: #4ade80;
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.875rem;
+    margin: 1rem 0;
+    word-break: break-all;
+    position: relative;
+  }
+  .key-warning {
+    background: var(--warning-subtle);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+    color: var(--warning);
+    font-size: 0.875rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .error-message {
+    background: var(--danger-subtle);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+    color: var(--danger);
+    font-size: 0.875rem;
+  }
+  .textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<section class="panel stack">
-  <h1 style="margin: 0;">Register Agent</h1>
-  <p class="muted" style="margin: 0;">
-    Submit a full Agent Card JSON and your API key. After registration, the normalized URL becomes immutable for updates.
-  </p>
-  <article class="panel" style="border-color: #fdba74;">
-    <strong>URL immutability:</strong>
-    if your endpoint URL changes later, use delete + re-register.
-  </article>
+<div class="register-container flex flex-col gap-6">
 
-  {% if error_message %}
-    <article class="panel" style="border-color: #fca5a5; color: #991b1b;">
-      <strong>Registration failed:</strong>
-      <pre class="mono" style="white-space: pre-wrap; margin: 0.5rem 0 0 0;">{{ error_message | tojson(indent=2) if error_message is mapping else error_message }}</pre>
-    </article>
+  {% if success %}
+    <!-- Success state -->
+    <div class="card success-card">
+      <div class="success-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
+          <path d="M20 6L9 17l-5-5"/>
+        </svg>
+      </div>
+      <h1 style="font-size: 1.5rem;">{{ agent_name }} is live!</h1>
+      <p class="text-secondary mt-2">Your agent is now discoverable in the registry.</p>
+      
+      <div class="key-warning mt-6">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;">
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span>Save your API key now. You won't be able to see it again.</span>
+      </div>
+      
+      <div class="key-display">
+        <span id="api-key">{{ api_key }}</span>
+      </div>
+      
+      <button class="btn btn-primary" onclick="copyKey()" id="copy-btn" style="width: 100%;">
+        Copy API Key
+      </button>
+      
+      <div class="flex gap-3 mt-6 justify-center">
+        <a href="/agent/{{ agent_id }}" class="btn btn-secondary">View agent profile</a>
+        <a href="/register" class="btn btn-ghost">Register another</a>
+      </div>
+    </div>
+
+  {% else %}
+    <!-- Registration form -->
+    <div class="flex flex-col gap-2">
+      <h1>Register an Agent</h1>
+      <p class="text-secondary">
+        Add your A2A-compatible agent to the public registry. You'll receive an API key for future updates.
+      </p>
+    </div>
+
+    {% if error %}
+      <div class="error-message">{{ error }}</div>
+    {% endif %}
+
+    <form action="/register" method="post" class="card form-section">
+      
+      <div class="form-group">
+        <label class="label" for="name">Agent name</label>
+        <input 
+          type="text" 
+          id="name" 
+          name="name" 
+          class="input" 
+          placeholder="My Agent"
+          value="{{ form.name|default('') }}"
+          required
+        >
+      </div>
+
+      <div class="form-group">
+        <label class="label" for="url">Agent URL</label>
+        <input 
+          type="url" 
+          id="url" 
+          name="url" 
+          class="input mono" 
+          placeholder="https://example.com/agent"
+          value="{{ form.url|default('') }}"
+          required
+        >
+        <span class="form-hint">The URL where your agent's A2A endpoint lives</span>
+      </div>
+
+      <div class="form-group">
+        <label class="label" for="description">Description</label>
+        <textarea 
+          id="description" 
+          name="description" 
+          class="input textarea" 
+          placeholder="What does your agent do?"
+        >{{ form.description|default('') }}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="label" for="card_json">Agent Card JSON <span class="text-tertiary">(optional)</span></label>
+        <textarea 
+          id="card_json" 
+          name="card_json" 
+          class="input textarea mono" 
+          placeholder='{"protocolVersion": "0.3.0", "skills": [...]}'
+          style="min-height: 120px;"
+        >{{ form.card_json|default('') }}</textarea>
+        <span class="form-hint">Full A2A Agent Card. If omitted, we'll generate a basic one from the fields above.</span>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">
+        Register agent
+      </button>
+
+    </form>
   {% endif %}
 
-  {% if success_result %}
-    <article class="panel" style="border-color: #86efac; color: #166534;">
-      <strong>Registration successful.</strong>
-      <p style="margin: 0.5rem 0 0 0;">ID: <span class="mono">{{ success_result.id }}</span></p>
-      <p style="margin: 0.25rem 0 0 0;">Normalized URL: <span class="mono">{{ success_result.url }}</span></p>
-      <a href="/agent/{{ success_result.id }}">View detail page</a>
-    </article>
-  {% endif %}
-
-  <form method="post" action="/register" class="stack">
-    <label>
-      API key
-      <input type="text" id="api_key" name="api_key" value="{{ api_key_value }}" placeholder="client-generated key" required>
-    </label>
-    <button type="button" id="generate_key">Generate Key</button>
-    <label>
-      Agent Card JSON
-      <textarea name="agent_card_json" rows="16" class="mono" placeholder='{"protocolVersion":"0.3.0", ...}' required>{{ agent_card_json }}</textarea>
-    </label>
-    <button type="submit">Register Agent</button>
-  </form>
-</section>
+</div>
 
 <script>
-  const generateBtn = document.getElementById("generate_key");
-  const keyInput = document.getElementById("api_key");
-  generateBtn.addEventListener("click", () => {
-    if (window.crypto && window.crypto.randomUUID) {
-      keyInput.value = window.crypto.randomUUID();
-      return;
-    }
-    keyInput.value = `key-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+function copyKey() {
+  const key = document.getElementById('api-key').textContent;
+  navigator.clipboard.writeText(key).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = '✓ Copied!';
+    btn.style.background = 'var(--success)';
+    setTimeout(() => {
+      btn.textContent = 'Copy API Key';
+      btn.style.background = '';
+    }, 3000);
   });
+}
 </script>
 {% endblock %}
