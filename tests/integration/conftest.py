@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import httpx
+import pytest_asyncio
+from sqlalchemy import delete
+
+import agora.main as main_module
+from agora.database import AsyncSessionLocal, close_engine
+from agora.main import app
+from agora.models import Agent
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_state() -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(delete(Agent))
+        await session.commit()
+
+    main_module.rate_limiter._windows.clear()
+    main_module.query_tracker._last_queried.clear()
+    main_module.latest_registry_snapshot = None
+    yield
+    await close_engine()
+
+
+@pytest_asyncio.fixture
+async def client() -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as test_client:
+        yield test_client
