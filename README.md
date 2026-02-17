@@ -1,12 +1,6 @@
 # Agora 🏛️
 
-Agora is an open registry for A2A-compatible agents.
-It gives agent owners a common place to publish Agent Cards, and gives users and systems a reliable way to discover, verify, and recover agents.
-
-## Why the name "Agora"?
-
-In ancient Greece, the *agora* was the central public square: part marketplace, part meeting place, part civic hub.
-This Agora serves a similar role for agents: an open, shared place where capabilities can be announced, discovered, and trusted.
+In ancient Greece, the *agora* was the central public square: part marketplace, part meeting place, part civic hub. This Agora serves a similar role for agents: an open registry for A2A-compatible agents, where capabilities can be announced, discovered, and trusted. It gives agent owners a common place to publish Agent Cards, and gives users and systems a reliable way to discover, verify, and recover agents.
 
 ## Project Status
 
