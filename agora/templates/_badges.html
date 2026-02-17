@@ -1,15 +1,40 @@
-{% macro health_badge(health_status) -%}
-  {% if health_status == "healthy" %}
+{# Health status badge #}
+{% macro health_badge(status) %}
+  {% if status == 'healthy' %}
     <span class="badge badge-healthy">Healthy</span>
-  {% elif health_status == "unhealthy" %}
+  {% elif status == 'stale' %}
+    <span class="badge badge-stale">Stale</span>
+  {% elif status == 'unhealthy' %}
     <span class="badge badge-unhealthy">Unhealthy</span>
   {% else %}
     <span class="badge badge-unknown">Unknown</span>
   {% endif %}
-{%- endmacro %}
+{% endmacro %}
 
-{% macro stale_badge(is_stale, stale_days) -%}
-  {% if is_stale %}
-    <span class="badge badge-stale">Stale {{ stale_days }}d</span>
+{# Stale indicator (days since last healthy check) #}
+{% macro stale_badge(is_stale, days) %}
+  {% if is_stale and days %}
+    <span class="badge badge-stale">{{ days }}d stale</span>
   {% endif %}
-{%- endmacro %}
+{% endmacro %}
+
+{# Verified badge #}
+{% macro verified_badge(is_verified) %}
+  {% if is_verified %}
+    <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M20 6L9 17l-5-5"/>
+      </svg>
+      Verified
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{# Tenure badge (for established agents) #}
+{% macro tenure_badge(days) %}
+  {% if days and days >= 30 %}
+    <span class="badge" style="color: var(--ink-secondary); background: var(--bg);">
+      {{ days }}d active
+    </span>
+  {% endif %}
+{% endmacro %}

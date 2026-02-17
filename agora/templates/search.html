@@ -1,82 +1,195 @@
 {% extends "base.html" %}
 {% from "_badges.html" import health_badge, stale_badge %}
-{% block title %}Search Agents{% endblock %}
-{% block content %}
-<section class="panel stack">
-  <h1 style="margin: 0;">Search Registry</h1>
-  <p class="muted" style="margin: 0;">Default ordering: healthy, unknown, unhealthy, then newest first.</p>
-  <form method="get" action="/search" class="grid">
-    <label>
-      Query
-      <input type="text" name="q" value="{{ filters.q }}" placeholder="Search name, description, skills, tags">
-    </label>
-    <label>
-      Skill IDs (comma separated)
-      <input type="text" name="skill" value="{{ filters.skill }}" placeholder="weather,translation">
-    </label>
-    <label>
-      Capabilities (comma separated)
-      <input type="text" name="capability" value="{{ filters.capability }}" placeholder="streaming,batch">
-    </label>
-    <label>
-      Tags (comma separated)
-      <input type="text" name="tag" value="{{ filters.tag }}" placeholder="research,finance">
-    </label>
-    <label>
-      Health
-      <select name="health">
-        <option value="" {% if filters.health == "" %}selected{% endif %}>All</option>
-        <option value="healthy" {% if filters.health == "healthy" %}selected{% endif %}>Healthy</option>
-        <option value="unknown" {% if filters.health == "unknown" %}selected{% endif %}>Unknown</option>
-        <option value="unhealthy" {% if filters.health == "unhealthy" %}selected{% endif %}>Unhealthy</option>
-      </select>
-    </label>
-    <label>
-      Stale
-      <select name="stale">
-        <option value="" {% if filters.stale == "" %}selected{% endif %}>All</option>
-        <option value="true" {% if filters.stale == "true" %}selected{% endif %}>Stale only</option>
-        <option value="false" {% if filters.stale == "false" %}selected{% endif %}>Not stale</option>
-      </select>
-    </label>
-    <label>
-      Limit
-      <input type="number" min="1" max="200" name="limit" value="{{ filters.limit }}">
-    </label>
-    <input type="hidden" name="offset" value="0">
-    <button type="submit">Apply Filters</button>
-  </form>
-</section>
+{% block title %}Explore Agents — Agora{% endblock %}
 
-<section class="panel stack" style="margin-top: 1rem;">
-  <h2 style="margin: 0;">Results ({{ results.total }})</h2>
-  {% if results.agents %}
-    <div class="stack">
-      {% for agent in results.agents %}
-        <article class="panel stack">
-          <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
-            <a href="/agent/{{ agent.id }}" style="font-weight: 700; color: var(--ink); text-decoration: none;">{{ agent.name }}</a>
-            <div style="display: inline-flex; gap: 0.35rem;">
-              {{ health_badge(agent.health_status) }}
-              {{ stale_badge(agent.is_stale, agent.stale_days) }}
+{% block head %}
+<style>
+  .search-bar {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    position: sticky;
+    top: 80px;
+    z-index: 50;
+  }
+  .filter-pills {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--ink-secondary);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+  .filter-pill:hover {
+    border-color: var(--border-hover);
+    color: var(--ink);
+  }
+  .filter-pill.active {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .sort-select {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--ink-secondary);
+    cursor: pointer;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col gap-6">
+
+  <!-- Search bar -->
+  <form action="/search" method="get" class="search-bar">
+    <input 
+      type="text" 
+      name="q" 
+      class="input" 
+      placeholder="Search agents..."
+      value="{{ query|default('') }}"
+      style="flex: 1;"
+    >
+    <button type="submit" class="btn btn-primary">Search</button>
+  </form>
+
+  <!-- Filters -->
+  <div class="flex items-center justify-between gap-4 flex-wrap">
+    <div class="filter-pills">
+      <button 
+        type="button" 
+        class="filter-pill {% if not health_filter or health_filter == 'all' %}active{% endif %}"
+        onclick="setFilter('health', 'all')"
+      >
+        All
+      </button>
+      <button 
+        type="button" 
+        class="filter-pill {% if health_filter == 'healthy' %}active{% endif %}"
+        onclick="setFilter('health', 'healthy')"
+      >
+        <span style="width: 6px; height: 6px; background: var(--success); border-radius: 50%;"></span>
+        Healthy only
+      </button>
+      <button 
+        type="button" 
+        class="filter-pill {% if health_filter == 'stale' %}active{% endif %}"
+        onclick="setFilter('health', 'stale')"
+      >
+        Include stale
+      </button>
+    </div>
+    
+    <select class="sort-select" onchange="setSort(this.value)">
+      <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Most recent</option>
+      <option value="health" {% if sort == 'health' %}selected{% endif %}>Healthiest first</option>
+      <option value="name" {% if sort == 'name' %}selected{% endif %}>Name A-Z</option>
+    </select>
+  </div>
+
+  <!-- Results -->
+  <section class="flex flex-col gap-4">
+    {% if query %}
+      <p class="text-secondary text-sm">
+        {{ agents|length }} result{% if agents|length != 1 %}s{% endif %} 
+        {% if query %}for "{{ query }}"{% endif %}
+      </p>
+    {% endif %}
+
+    {% if agents %}
+      <div class="grid grid-cols-2 gap-4">
+        {% for agent in agents %}
+          <a href="/agent/{{ agent.id }}" class="card card-clickable agent-card" style="text-decoration: none;">
+            <div class="agent-card-header">
+              <span class="agent-name">{{ agent.name }}</span>
+              <div class="flex gap-2">
+                {{ health_badge(agent.health_status) }}
+              </div>
             </div>
-          </div>
-          <p class="muted" style="margin: 0;">{{ agent.description or "" }}</p>
-          <p class="mono" style="margin: 0;">{{ agent.url }}</p>
-          <p class="muted" style="margin: 0;">Skills: {{ agent.skills | join(", ") }}</p>
-        </article>
-      {% endfor %}
-    </div>
-    <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap;">
-      {% if has_previous %}
-        <a class="panel" style="text-decoration: none; color: var(--ink);" href="/search?q={{ filters.q }}&skill={{ filters.skill }}&capability={{ filters.capability }}&tag={{ filters.tag }}&health={{ filters.health }}&stale={{ filters.stale }}&limit={{ filters.limit }}&offset={{ previous_offset }}">Previous</a>
+            {% if agent.description %}
+              <p class="agent-description">{{ agent.description }}</p>
+            {% endif %}
+            <div class="agent-meta">
+              <span class="mono text-xs text-tertiary" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                {{ agent.url }}
+              </span>
+              {% if agent.last_healthy_at %}
+                <span class="text-xs text-tertiary">
+                  {% if agent.last_healthy_at %}Last healthy {{ agent.last_healthy_at.strftime('%b %d') }}{% endif %}
+                </span>
+              {% endif %}
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+      
+      {% if has_more %}
+        <div class="flex justify-center mt-4">
+          <button type="button" class="btn btn-secondary" onclick="loadMore()">
+            Load more agents
+          </button>
+        </div>
       {% endif %}
-      {% if has_next %}
-        <a class="panel" style="text-decoration: none; color: var(--ink);" href="/search?q={{ filters.q }}&skill={{ filters.skill }}&capability={{ filters.capability }}&tag={{ filters.tag }}&health={{ filters.health }}&stale={{ filters.stale }}&limit={{ filters.limit }}&offset={{ next_offset }}">Next</a>
-      {% endif %}
-    </div>
-  {% else %}
-    <p class="muted">No matching agents.</p>
-  {% endif %}
-</section>
+    {% else %}
+      <div class="card empty-state">
+        {% if query %}
+          <p class="text-secondary">No agents match "{{ query }}"</p>
+          <p class="text-sm text-tertiary mt-2">Try a different search term or browse all agents</p>
+          <a href="/search" class="btn btn-secondary mt-4">Clear search</a>
+        {% else %}
+          <p class="text-secondary">No agents registered yet</p>
+          <p class="text-sm text-tertiary mt-2">Be the first to add an agent to the registry</p>
+          <a href="/register" class="btn btn-primary mt-4">Register an agent</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+</div>
+
+<script>
+function setFilter(type, value) {
+  const url = new URL(window.location);
+  url.searchParams.set(type, value);
+  window.location = url;
+}
+
+function setSort(value) {
+  const url = new URL(window.location);
+  url.searchParams.set('sort', value);
+  window.location = url;
+}
+
+function loadMore() {
+  const url = new URL(window.location);
+  const page = parseInt(url.searchParams.get('page') || '1');
+  url.searchParams.set('page', page + 1);
+  window.location = url;
+}
+</script>
 {% endblock %}

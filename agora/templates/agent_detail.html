@@ -1,47 +1,239 @@
 {% extends "base.html" %}
-{% from "_badges.html" import health_badge, stale_badge %}
-{% block title %}Agent Detail{% endblock %}
-{% block content %}
-<section class="panel stack">
-  <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-    <h1 style="margin: 0;">{{ detail.agent_card.name }}</h1>
-    <div style="display: inline-flex; gap: 0.35rem;">
-      {{ health_badge(detail.health_status) }}
-      {{ stale_badge(detail.is_stale, detail.stale_days) }}
-    </div>
-  </div>
-  <p class="muted" style="margin: 0;">{{ detail.agent_card.description or "" }}</p>
-  <a class="mono" href="{{ detail.agent_card.url }}" target="_blank" rel="noopener">{{ detail.agent_card.url }}</a>
+{% from "_badges.html" import health_badge, verified_badge, tenure_badge %}
+{% block title %}{{ agent.name }} — Agora{% endblock %}
 
-  {% if detail.is_stale %}
-    <article class="panel" style="border-color: #fdba74;">
-      <strong>Candidate for manual review:</strong>
-      this agent has been unhealthy long enough to be considered stale.
-    </article>
+{% block head %}
+<style>
+  .agent-header {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .agent-title {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .agent-badges {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 0.75rem 1.5rem;
+    font-size: 0.9375rem;
+  }
+  .detail-label {
+    color: var(--ink-tertiary);
+    font-weight: 500;
+  }
+  .detail-value {
+    color: var(--ink);
+  }
+  .health-timeline {
+    display: flex;
+    gap: 2px;
+    height: 24px;
+    align-items: stretch;
+  }
+  .health-bar {
+    flex: 1;
+    border-radius: 2px;
+    min-width: 3px;
+  }
+  .health-bar.healthy { background: var(--success); }
+  .health-bar.stale { background: var(--warning); }
+  .health-bar.unhealthy { background: var(--danger); }
+  .health-bar.unknown { background: var(--border); }
+  .skills-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .skill-tag {
+    display: inline-flex;
+    padding: 0.375rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    color: var(--ink-secondary);
+  }
+  .code-block {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8125rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .action-buttons {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  @media (max-width: 640px) {
+    .detail-grid {
+      grid-template-columns: 1fr;
+      gap: 0.25rem 0;
+    }
+    .detail-label { margin-top: 0.75rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col gap-8">
+
+  <!-- Back link -->
+  <a href="/search" class="text-sm text-tertiary" style="text-decoration: none;">
+    ← Back to search
+  </a>
+
+  <!-- Header -->
+  <section class="card">
+    <div class="agent-header">
+      <div class="agent-title">
+        <div class="flex flex-col gap-2">
+          <h1>{{ agent.name }}</h1>
+          {% if agent.description %}
+            <p class="text-secondary" style="max-width: 600px;">{{ agent.description }}</p>
+          {% endif %}
+        </div>
+        <div class="agent-badges">
+          {{ health_badge(agent.health_status) }}
+          {{ verified_badge(agent.is_verified) }}
+          {{ tenure_badge(agent.tenure_days) }}
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-4 mt-2">
+        <a href="{{ agent.url }}" target="_blank" rel="noopener" class="mono text-sm" style="color: var(--accent);">
+          {{ agent.url }}
+        </a>
+        <button class="copy-btn" onclick="copyToClipboard('{{ agent.url }}', this)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+          </svg>
+          Copy URL
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Health history -->
+  {% if health_history %}
+  <section class="flex flex-col gap-3">
+    <h2>Health History <span class="text-sm text-tertiary" style="font-weight: 400;">(last 30 days)</span></h2>
+    <div class="card">
+      <div class="health-timeline" title="Health checks over the last 30 days">
+        {% for day in health_history %}
+          <div class="health-bar {{ day.status }}" title="{{ day.date }}: {{ day.status }}"></div>
+        {% endfor %}
+      </div>
+      <div class="flex justify-between mt-3 text-xs text-tertiary">
+        <span>30 days ago</span>
+        <span>Today</span>
+      </div>
+    </div>
+  </section>
   {% endif %}
 
-  <div class="grid">
-    <article class="panel">
-      <p class="muted" style="margin: 0;">Agent ID</p>
-      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.id }}</p>
-    </article>
-    <article class="panel">
-      <p class="muted" style="margin: 0;">Registered</p>
-      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.registered_at }}</p>
-    </article>
-    <article class="panel">
-      <p class="muted" style="margin: 0;">Last Health Check</p>
-      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.last_health_check or "never" }}</p>
-    </article>
-    <article class="panel">
-      <p class="muted" style="margin: 0;">Last Healthy At</p>
-      <p class="mono" style="margin: 0.25rem 0 0 0;">{{ detail.last_healthy_at or "never" }}</p>
-    </article>
-  </div>
-</section>
+  <!-- Details -->
+  <section class="flex flex-col gap-3">
+    <h2>Details</h2>
+    <div class="card">
+      <div class="detail-grid">
+        <span class="detail-label">Protocol</span>
+        <span class="detail-value mono">{{ agent.protocol_version|default('A2A v0.3') }}</span>
+        
+        <span class="detail-label">Registered</span>
+        <span class="detail-value">{{ agent.created_at.strftime('%b %d, %Y') if agent.created_at else 'Unknown' }}</span>
+        
+        <span class="detail-label">Last healthy</span>
+        <span class="detail-value">
+          {% if agent.last_healthy_at %}
+            {{ agent.last_healthy_at.strftime('%b %d, %Y at %H:%M') if agent.last_healthy_at else 'Unknown' }}
+          {% else %}
+            Never checked
+          {% endif %}
+        </span>
+        
+        {% if agent.version %}
+        <span class="detail-label">Version</span>
+        <span class="detail-value">{{ agent.version }}</span>
+        {% endif %}
+      </div>
+    </div>
+  </section>
 
-<section class="panel stack" style="margin-top: 1rem;">
-  <h2 style="margin: 0;">Full Agent Card</h2>
-  <pre class="mono" style="margin: 0; white-space: pre-wrap;">{{ detail.agent_card | tojson(indent=2) }}</pre>
-</section>
+  <!-- Skills / Capabilities -->
+  {% if agent.skills %}
+  <section class="flex flex-col gap-3">
+    <h2>Capabilities</h2>
+    <div class="card">
+      <div class="skills-list">
+        {% for skill in agent.skills %}
+          <span class="skill-tag">{{ skill.name|default(skill.id) }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Agent Card JSON -->
+  <section class="flex flex-col gap-3">
+    <div class="flex items-center justify-between">
+      <h2>Agent Card</h2>
+      <button class="copy-btn" onclick="copyToClipboard(document.getElementById('agent-card-json').textContent, this)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+        </svg>
+        Copy JSON
+      </button>
+    </div>
+    <div class="code-block" id="agent-card-json">{{ agent.card | tojson(indent=2) }}</div>
+  </section>
+
+  <!-- Owner actions (if authenticated) -->
+  {% if is_owner %}
+  <section class="flex flex-col gap-3">
+    <h2>Manage Agent</h2>
+    <div class="action-buttons">
+      <a href="/agent/{{ agent.id }}/edit" class="btn btn-secondary">Edit agent</a>
+      <button class="btn btn-secondary" style="color: var(--danger);" onclick="confirmDelete()">Delete agent</button>
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+
+<script>
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const original = btn.innerHTML;
+    btn.classList.add('copied');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
+    setTimeout(() => {
+      btn.innerHTML = original;
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+function confirmDelete() {
+  if (confirm('Are you sure you want to delete this agent? This cannot be undone.')) {
+    fetch('/api/v1/agents/{{ agent.id }}', { method: 'DELETE' })
+      .then(r => { if (r.ok) window.location = '/search'; });
+  }
+}
+</script>
 {% endblock %}

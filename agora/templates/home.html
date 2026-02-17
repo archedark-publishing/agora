@@ -1,51 +1,83 @@
 {% extends "base.html" %}
-{% from "_badges.html" import health_badge, stale_badge %}
-{% block title %}Agora Home{% endblock %}
-{% block content %}
-<section class="panel stack">
-  <h1 style="margin: 0;">Open Agent Discovery</h1>
-  <p class="muted" style="margin: 0;">
-    Search the public registry, inspect health signals, and connect to agents instantly.
-  </p>
-  <form action="/search" method="get" class="grid">
-    <label style="grid-column: 1 / -1;">
-      Search agents
-      <input type="text" name="q" placeholder="Try: weather, research, translation">
-    </label>
-    <button type="submit">Search Registry</button>
-  </form>
-  <div class="grid">
-    <article class="panel">
-      <p class="muted" style="margin: 0;">Total Agents</p>
-      <p class="mono" style="font-size: 1.6rem; margin: 0.2rem 0 0 0;">{{ stats.total_agents }}</p>
-    </article>
-    <article class="panel">
-      <p class="muted" style="margin: 0;">Healthy Agents</p>
-      <p class="mono" style="font-size: 1.6rem; margin: 0.2rem 0 0 0;">{{ stats.healthy_agents }}</p>
-    </article>
-  </div>
-</section>
+{% from "_badges.html" import health_badge %}
+{% block title %}Agora — Agent Discovery{% endblock %}
 
-<section class="panel stack" style="margin-top: 1rem;">
-  <h2 style="margin: 0;">Recent Registrations</h2>
-  {% if recent_agents %}
-    <div class="stack">
-      {% for agent in recent_agents %}
-        <article class="panel stack">
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
-            <a href="/agent/{{ agent.id }}" style="font-weight: 700; color: var(--ink); text-decoration: none;">{{ agent.name }}</a>
-            <div style="display: inline-flex; gap: 0.35rem;">
-              {{ health_badge(agent.health_status) }}
-              {{ stale_badge(agent.is_stale, agent.stale_days) }}
-            </div>
-          </div>
-          <p class="muted" style="margin: 0;">{{ agent.description }}</p>
-          <a class="mono" href="{{ agent.url }}" target="_blank" rel="noopener">{{ agent.url }}</a>
-        </article>
-      {% endfor %}
+{% block content %}
+<div class="flex flex-col gap-8">
+  
+  <!-- Hero -->
+  <section class="flex flex-col gap-6">
+    <div class="flex flex-col gap-2">
+      <h1>Discover A2A Agents</h1>
+      <p class="text-secondary" style="max-width: 560px;">
+        Find agents by capability, check their health status, and integrate them into your systems. 
+        Open registry, open protocol.
+      </p>
     </div>
-  {% else %}
-    <p class="muted">No agents registered yet.</p>
-  {% endif %}
-</section>
+    
+    <form action="/search" method="get" class="flex gap-3" style="max-width: 480px;">
+      <input 
+        type="text" 
+        name="q" 
+        class="input" 
+        placeholder="Search by name, capability, or description..."
+        style="flex: 1;"
+      >
+      <button type="submit" class="btn btn-primary">Search</button>
+    </form>
+  </section>
+
+  <!-- Stats -->
+  <section class="grid grid-cols-3 gap-4">
+    <div class="card stat-card">
+      <div class="stat-value">{{ stats.total_agents }}</div>
+      <div class="stat-label">Registered agents</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-value" style="color: var(--success);">{{ stats.healthy_agents }}</div>
+      <div class="stat-label">Healthy right now</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-value">{{ stats.healthy_percent|default(0) }}%</div>
+      <div class="stat-label">Health rate</div>
+    </div>
+  </section>
+
+  <!-- Recent Registrations -->
+  <section class="flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+      <h2>Recently Registered</h2>
+      <a href="/search" class="btn btn-ghost text-sm">View all →</a>
+    </div>
+    
+    {% if recent_agents %}
+      <div class="grid grid-cols-2 gap-4">
+        {% for agent in recent_agents[:6] %}
+          <a href="/agent/{{ agent.id }}" class="card card-clickable agent-card" style="text-decoration: none;">
+            <div class="agent-card-header">
+              <span class="agent-name">{{ agent.name }}</span>
+              {{ health_badge(agent.health_status) }}
+            </div>
+            {% if agent.description %}
+              <p class="agent-description">{{ agent.description }}</p>
+            {% endif %}
+            <div class="agent-meta">
+              <span class="text-xs text-tertiary">
+                {% if agent.created_at %}Registered{% else %}Recently added{% endif %}
+              </span>
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="card empty-state">
+        <p class="text-secondary">No agents registered yet.</p>
+        <p class="mt-2">
+          <a href="/register" class="btn btn-primary" style="margin-top: 0.5rem;">Register the first agent</a>
+        </p>
+      </div>
+    {% endif %}
+  </section>
+
+</div>
 {% endblock %}
