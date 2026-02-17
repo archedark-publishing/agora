@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agora.models import Agent
 from agora.query_tracker import QueryTracker
-from agora.url_safety import URLSafetyError, assert_url_safe_for_outbound
+from agora.url_safety import (
+    URLSafetyError,
+    assert_url_safe_for_outbound,
+    pin_hostname_resolution,
+)
 from agora.validation import AgentCardValidationError, validate_agent_card
 
 
@@ -57,11 +61,12 @@ async def _check_single_agent(
     probe_url = build_agent_card_probe_url(agent.url)
     previous_last_healthy = agent.last_healthy_at
     try:
-        assert_url_safe_for_outbound(
+        safe_target = assert_url_safe_for_outbound(
             probe_url,
             allow_private=allow_private_network_targets,
         )
-        response = await client.get(probe_url, follow_redirects=False)
+        async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+            response = await client.get(probe_url, follow_redirects=False)
         response.raise_for_status()
         payload = response.json()
         validate_agent_card(payload)

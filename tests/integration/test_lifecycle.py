@@ -14,7 +14,7 @@ def build_payload(name: str, url: str, skill_id: str = "weather") -> dict:
 
 
 async def test_register_search_detail_update_delete_lifecycle(client) -> None:
-    payload = build_payload("Lifecycle Agent", "https://lifecycle.example.com/a2a", "weather")
+    payload = build_payload("Lifecycle Agent", "https://example.com/lifecycle/a2a", "weather")
 
     register = await client.post(
         "/api/v1/agents",
@@ -32,7 +32,7 @@ async def test_register_search_detail_update_delete_lifecycle(client) -> None:
     assert detail.status_code == 200
     assert detail.json()["id"] == agent_id
 
-    updated = build_payload("Lifecycle Agent Updated", "https://lifecycle.example.com/a2a", "weather")
+    updated = build_payload("Lifecycle Agent Updated", "https://example.com/lifecycle/a2a", "weather")
     update = await client.put(
         f"/api/v1/agents/{agent_id}",
         json=updated,
@@ -43,7 +43,7 @@ async def test_register_search_detail_update_delete_lifecycle(client) -> None:
 
     immutable_fail = build_payload(
         "Lifecycle Agent Updated",
-        "https://lifecycle.example.com/changed-path",
+        "https://example.com/lifecycle/changed-path",
         "weather",
     )
     immutable_update = await client.put(

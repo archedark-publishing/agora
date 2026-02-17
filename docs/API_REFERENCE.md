@@ -51,10 +51,10 @@ Deletes the agent on valid key.
 
 - `POST /api/v1/agents/{id}/recovery/start`  
 No key required.  
-Returns one-time challenge token, verify URL, and expiration timestamp.
+Returns one-time challenge token, recovery session secret, verify URL, and expiration timestamp.
 
 - `POST /api/v1/agents/{id}/recovery/complete`  
-Headers: `X-API-Key` (new owner key)  
+Headers: `X-API-Key` (new owner key), `X-Recovery-Session` (from recovery start)  
 Fetches verification token from `https://<agent-origin>/.well-known/agora-verify`, verifies, rotates key.
 
 ## Registry + Observability
@@ -63,7 +63,8 @@ Fetches verification token from `https://<agent-origin>/.well-known/agora-verify
 Serves the latest cached registry snapshot with cache headers.
 
 - `GET /api/v1/metrics`  
-In-memory request metrics and last health summary.
+Headers: `X-Admin-Token`  
+Returns bounded in-memory request metrics and last health summary when `ADMIN_API_TOKEN` is configured.
 
 - `GET /api/v1/admin/stale-candidates`  
 Headers: `X-Admin-Token`  
@@ -86,4 +87,5 @@ Returns stale candidates report if `ADMIN_API_TOKEN` is configured.
 - `401` invalid API/admin key
 - `404` unknown resource
 - `409` duplicate normalized URL
+- `413` payload too large
 - `429` rate limit exceeded (includes `Retry-After`)

@@ -12,7 +12,13 @@ RUN apt-get update \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . /app
+COPY agora /app/agora
+COPY alembic /app/alembic
+COPY alembic.ini /app/alembic.ini
+
+RUN addgroup --system app && adduser --system --ingroup app app \
+    && chown -R app:app /app
+USER app
 
 EXPOSE 8000
 

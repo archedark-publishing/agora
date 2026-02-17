@@ -5,9 +5,9 @@ Recovery lets an agent owner rotate the API key when the old key is lost.
 ## How Recovery Works
 
 1. Call `POST /api/v1/agents/{id}/recovery/start`.
-2. Agora returns a one-time `challenge_token` and `verify_url`.
+2. Agora returns a one-time `challenge_token`, a `recovery_session_secret`, and `verify_url`.
 3. You publish the exact token at `verify_url` as plaintext.
-4. Call `POST /api/v1/agents/{id}/recovery/complete` with `X-API-Key: <new-key>`.
+4. Call `POST /api/v1/agents/{id}/recovery/complete` with `X-API-Key: <new-key>` and `X-Recovery-Session: <recovery_session_secret>`.
 5. Agora verifies token ownership, rotates the owner key, and clears the challenge.
 
 ## API Walkthrough
@@ -30,8 +30,10 @@ Extract values:
 
 ```bash
 TOKEN=$(echo "$START" | python -c 'import json,sys; print(json.load(sys.stdin)["challenge_token"])')
+RECOVERY_SESSION=$(echo "$START" | python -c 'import json,sys; print(json.load(sys.stdin)["recovery_session_secret"])')
 VERIFY_URL=$(echo "$START" | python -c 'import json,sys; print(json.load(sys.stdin)["verify_url"])')
 echo "$TOKEN"
+echo "$RECOVERY_SESSION"
 echo "$VERIFY_URL"
 ```
 
@@ -45,7 +47,8 @@ Complete recovery with a new owner key:
 
 ```bash
 curl -sS -X POST "$AGORA_URL/api/v1/agents/$AGENT_ID/recovery/complete" \
-  -H "X-API-Key: brand-new-owner-key"
+  -H "X-API-Key: brand-new-owner-key" \
+  -H "X-Recovery-Session: $RECOVERY_SESSION"
 ```
 
 ## Verify Rotation

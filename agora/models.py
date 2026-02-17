@@ -58,7 +58,7 @@ class Agent(Base):
     output_modes: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
 
     # Ownership + metadata
-    owner_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    owner_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     registered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -86,6 +86,10 @@ class Agent(Base):
         nullable=True,
     )
     recovery_challenge_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    recovery_session_hash: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
     )

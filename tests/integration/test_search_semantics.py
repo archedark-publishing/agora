@@ -22,12 +22,12 @@ def payload(name: str, url: str, skill_id: str, tags: list[str], capabilities: d
 
 async def test_search_semantics_and_default_ordering(client) -> None:
     specs = [
-        ("healthy-new", "https://search.example.com/healthy-new", "skill-weather", ["alpha"], {"streaming": True}),
-        ("healthy-old", "https://search.example.com/healthy-old", "skill-translate", ["beta"], {"batch": True}),
-        ("unknown-new", "https://search.example.com/unknown-new", "skill-weather", ["gamma"], {"streaming": True}),
-        ("unhealthy-recent", "https://search.example.com/unhealthy-recent", "skill-research", ["delta"], {"streaming": True}),
-        ("unhealthy-stale-lasthealthy", "https://search.example.com/unhealthy-stale-lasthealthy", "skill-weather", ["epsilon"], {"batch": True}),
-        ("unhealthy-stale-never", "https://search.example.com/unhealthy-stale-never", "skill-translate", ["zeta"], {"streaming": True}),
+        ("healthy-new", "https://example.com/search/healthy-new", "skill-weather", ["alpha"], {"streaming": True}),
+        ("healthy-old", "https://example.com/search/healthy-old", "skill-translate", ["beta"], {"batch": True}),
+        ("unknown-new", "https://example.com/search/unknown-new", "skill-weather", ["gamma"], {"streaming": True}),
+        ("unhealthy-recent", "https://example.com/search/unhealthy-recent", "skill-research", ["delta"], {"streaming": True}),
+        ("unhealthy-stale-lasthealthy", "https://example.com/search/unhealthy-stale-lasthealthy", "skill-weather", ["epsilon"], {"batch": True}),
+        ("unhealthy-stale-never", "https://example.com/search/unhealthy-stale-never", "skill-translate", ["zeta"], {"streaming": True}),
     ]
 
     ids: dict[str, str] = {}

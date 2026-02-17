@@ -47,6 +47,21 @@ Update payload changed the agent URL.
 Fix:
 - Keep `url` exactly equal to existing agent URL on `PUT`.
 
+### `400 ... URL userinfo is not allowed`
+
+Agent URL included credentials/userinfo (for example `trusted.example.com@attacker.example.net`).
+
+Fix:
+- Use clean origin URLs without `user:pass@` segments.
+
+### `400 ... Unable to resolve target hostname`
+
+Registration/update URL host does not resolve in DNS.
+
+Fix:
+- Verify DNS for the hostname.
+- For local-only experiments, set `ALLOW_UNRESOLVABLE_REGISTRATION_HOSTNAMES=true`.
+
 ### `401 Invalid API key`
 
 Wrong owner key for update/delete.

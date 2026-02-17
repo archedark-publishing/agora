@@ -1,40 +1,50 @@
 """FastAPI entrypoint for Agora."""
 
 import asyncio
+import hmac
+import ipaddress
 import json
 import logging
-from email.utils import format_datetime
 from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from secrets import token_urlsafe
-from urllib.parse import urlsplit
-from typing import Any
 from time import monotonic
+from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Text, case, cast, func, not_, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Text, case, cast, func, not_, or_, select, update
+from sqlalchemy.exc import DBAPIError, DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agora.config import get_settings
 from agora.database import AsyncSessionLocal, close_engine, get_db_session, run_health_query
 from agora.health_checker import run_health_check_cycle
+from agora.metrics import BoundedRequestMetrics
 from agora.models import Agent
 from agora.query_tracker import QueryTracker
-from agora.rate_limit import SlidingWindowRateLimiter
+from agora.rate_limit import RateLimitBackendError, create_rate_limiter
 from agora.registry_export import build_registry_snapshot
 from agora.sanitization import sanitize_json_strings, sanitize_ui_text
-from agora.security import hash_api_key, verify_api_key
+from agora.security import (
+    api_key_fingerprint,
+    hash_api_key,
+    should_rehash_api_key_hash,
+    verify_api_key,
+)
 from agora.stale import compute_agent_stale_metadata, stale_filter_expression
+from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.url_safety import (
     URLSafetyError,
     assert_url_safe_for_outbound,
     assert_url_safe_for_registration,
+    pin_hostname_resolution,
 )
-from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.validation import AgentCardValidationError, validate_agent_card
 
 settings = get_settings()
@@ -45,7 +55,18 @@ logging.basicConfig(
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 started_at_monotonic = monotonic()
 RATE_LIMIT_WINDOW_SECONDS = 3600
-rate_limiter = SlidingWindowRateLimiter()
+rate_limit_logger = logging.getLogger("agora.rate_limit")
+rate_limiter, rate_limiter_is_shared = create_rate_limiter(
+    backend=settings.rate_limit_backend,
+    redis_url=settings.redis_url,
+    prefix=settings.rate_limit_prefix,
+    logger=rate_limit_logger,
+)
+if settings.environment.lower() not in {"development", "test"} and not rate_limiter_is_shared:
+    raise RuntimeError(
+        "Shared rate limiting is required outside development/test. "
+        "Configure REDIS_URL or RATE_LIMIT_BACKEND=redis."
+    )
 recovery_logger = logging.getLogger("agora.recovery")
 health_logger = logging.getLogger("agora.health")
 registry_logger = logging.getLogger("agora.registry")
@@ -54,7 +75,7 @@ query_tracker = QueryTracker()
 health_task: asyncio.Task[None] | None = None
 registry_task: asyncio.Task[None] | None = None
 latest_registry_snapshot: dict[str, Any] | None = None
-request_metrics: dict[str, int] = {}
+request_metrics = BoundedRequestMetrics(max_entries=settings.metrics_max_entries)
 last_health_summary: dict[str, int] = {
     "checked_count": 0,
     "healthy_count": 0,
@@ -66,6 +87,26 @@ templates = Jinja2Templates(directory="agora/templates")
 
 def _track_agent_query(agent_id: UUID) -> None:
     query_tracker.mark(agent_id)
+
+
+def _metric_route_label(request: Request) -> str:
+    route = request.scope.get("route")
+    if isinstance(route, APIRoute):
+        return route.path
+    return "_unmatched"
+
+
+async def _require_admin_token(
+    request: Request,
+    admin_token: str | None,
+    *,
+    scope: str,
+) -> None:
+    if settings.admin_api_token is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not configured")
+    await _enforce_admin_rate_limits(request, scope=scope)
+    if not hmac.compare_digest(admin_token or "", settings.admin_api_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
 
 
 async def _health_checker_loop() -> None:
@@ -122,14 +163,37 @@ async def startup_event() -> None:
 
 
 @app.middleware("http")
+async def request_size_limit_middleware(request: Request, call_next: Any) -> Response:
+    limit = settings.max_request_body_bytes
+    if limit > 0 and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"detail": "Invalid Content-Length header"},
+                )
+            if declared_size > limit:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={"detail": "Request payload too large"},
+                )
+
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def request_logging_middleware(request: Request, call_next: Any) -> Response:
     started = monotonic()
     path = request.url.path
-    method = request.method
+    method = request.method.upper()
     try:
         response = await call_next(request)
     except Exception:
         latency_ms = int((monotonic() - started) * 1000)
+        route_label = _metric_route_label(request)
         request_logger.exception(
             "request method=%s path=%s status=%s latency_ms=%s",
             method,
@@ -137,10 +201,11 @@ async def request_logging_middleware(request: Request, call_next: Any) -> Respon
             500,
             latency_ms,
         )
-        request_metrics[f"{method} {path} 500"] = request_metrics.get(f"{method} {path} 500", 0) + 1
+        request_metrics.increment(f"{method} {route_label} 500")
         raise
 
     latency_ms = int((monotonic() - started) * 1000)
+    route_label = _metric_route_label(request)
     request_logger.info(
         "request method=%s path=%s status=%s latency_ms=%s",
         method,
@@ -148,8 +213,8 @@ async def request_logging_middleware(request: Request, call_next: Any) -> Respon
         response.status_code,
         latency_ms,
     )
-    key = f"{method} {path} {response.status_code}"
-    request_metrics[key] = request_metrics.get(key, 0) + 1
+    key = f"{method} {route_label} {response.status_code}"
+    request_metrics.increment(key)
     return response
 
 
@@ -170,6 +235,7 @@ async def shutdown_event() -> None:
         except asyncio.CancelledError:
             pass
         registry_task = None
+    await rate_limiter.close()
     await close_engine()
 
 
@@ -414,6 +480,7 @@ async def recover_page(request: Request) -> HTMLResponse:
             "start_result": None,
             "complete_result": None,
             "agent_id_value": "",
+            "recovery_session_secret_value": "",
         },
     )
 
@@ -436,6 +503,7 @@ async def recover_start_page(
                 "start_result": None,
                 "complete_result": None,
                 "agent_id_value": agent_id,
+                "recovery_session_secret_value": "",
             },
             status_code=400,
         )
@@ -452,6 +520,7 @@ async def recover_start_page(
                 "start_result": None,
                 "complete_result": None,
                 "agent_id_value": agent_id,
+                "recovery_session_secret_value": "",
             },
             status_code=exc.status_code,
         )
@@ -465,6 +534,7 @@ async def recover_start_page(
             "start_result": result,
             "complete_result": None,
             "agent_id_value": agent_id,
+            "recovery_session_secret_value": result["recovery_session_secret"],
         },
         status_code=200,
     )
@@ -476,6 +546,7 @@ async def recover_complete_page(
     session: AsyncSession = Depends(get_db_session),
     agent_id: str = Form(...),
     new_api_key: str = Form(...),
+    recovery_session_secret: str = Form(...),
 ) -> HTMLResponse:
     try:
         parsed_id = UUID(agent_id)
@@ -489,6 +560,7 @@ async def recover_complete_page(
                 "start_result": None,
                 "complete_result": None,
                 "agent_id_value": agent_id,
+                "recovery_session_secret_value": recovery_session_secret,
             },
             status_code=400,
         )
@@ -499,6 +571,7 @@ async def recover_complete_page(
             request=request,
             session=session,
             api_key=new_api_key,
+            recovery_session_secret=recovery_session_secret,
         )
     except HTTPException as exc:
         return templates.TemplateResponse(
@@ -510,6 +583,7 @@ async def recover_complete_page(
                 "start_result": None,
                 "complete_result": None,
                 "agent_id_value": agent_id,
+                "recovery_session_secret_value": recovery_session_secret,
             },
             status_code=exc.status_code,
         )
@@ -523,6 +597,7 @@ async def recover_complete_page(
             "start_result": None,
             "complete_result": result,
             "agent_id_value": agent_id,
+            "recovery_session_secret_value": "",
         },
         status_code=200,
     )
@@ -539,25 +614,50 @@ def _build_verify_url(agent_url: str) -> str:
     return f"https://{host}/.well-known/agora-verify"
 
 
-async def _fetch_recovery_token(verify_url: str) -> str:
+def _invalid_agent_card_length_detail() -> dict[str, Any]:
+    return {
+        "message": "Invalid Agent Card",
+        "errors": [
+            {
+                "field": "agent_card",
+                "message": "One or more fields exceed maximum allowed length",
+                "type": "value_error.any_str.max_length",
+            }
+        ],
+    }
+
+
+async def _fetch_recovery_token(
+    verify_url: str,
+    *,
+    pinned_hostname: str,
+    pinned_ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> str:
     timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-        response = await client.get(verify_url)
-        response.raise_for_status()
-        return response.text
+    async with pin_hostname_resolution(pinned_hostname, pinned_ip):
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.get(verify_url)
+            response.raise_for_status()
+            return response.text
 
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _enforce_rate_limit(
+async def _enforce_rate_limit(
     *,
     key: str,
     limit: int,
     window_seconds: int = RATE_LIMIT_WINDOW_SECONDS,
 ) -> None:
-    result = rate_limiter.check(key=key, limit=limit, window_seconds=window_seconds)
+    try:
+        result = await rate_limiter.check(key=key, limit=limit, window_seconds=window_seconds)
+    except RateLimitBackendError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiting unavailable",
+        ) from exc
     if result.allowed:
         return
     raise HTTPException(
@@ -567,7 +667,52 @@ def _enforce_rate_limit(
     )
 
 
-def _enforce_recovery_rate_limits(request: Request, agent_id: UUID, action: str) -> None:
+async def _enforce_registration_rate_limits(request: Request, api_key: str) -> None:
+    ip = _client_ip(request)
+    await _enforce_rate_limit(
+        key=f"api:post_agents:ip:{ip}",
+        limit=settings.registration_rate_limit_per_ip,
+    )
+    await _enforce_rate_limit(
+        key=f"api:post_agents:key:{api_key_fingerprint(api_key)}",
+        limit=settings.registration_rate_limit_per_api_key,
+    )
+    await _enforce_rate_limit(
+        key="api:post_agents:global",
+        limit=settings.registration_rate_limit_global,
+    )
+
+
+async def _enforce_list_agents_rate_limits(request: Request, api_key: str | None) -> None:
+    ip = _client_ip(request)
+    await _enforce_rate_limit(
+        key=f"api:get_agents:ip:{ip}",
+        limit=settings.list_agents_rate_limit_per_ip,
+    )
+    if api_key:
+        await _enforce_rate_limit(
+            key=f"api:get_agents:key:{api_key_fingerprint(api_key)}",
+            limit=settings.list_agents_rate_limit_per_api_key,
+        )
+    await _enforce_rate_limit(
+        key="api:get_agents:global",
+        limit=settings.list_agents_rate_limit_global,
+    )
+
+
+async def _enforce_admin_rate_limits(request: Request, *, scope: str) -> None:
+    ip = _client_ip(request)
+    await _enforce_rate_limit(
+        key=f"api:admin:{scope}:ip:{ip}",
+        limit=settings.admin_rate_limit_per_ip,
+    )
+    await _enforce_rate_limit(
+        key=f"api:admin:{scope}:global",
+        limit=settings.admin_rate_limit_global,
+    )
+
+
+async def _enforce_recovery_rate_limits(request: Request, agent_id: UUID, action: str) -> None:
     ip = _client_ip(request)
     if action == "start":
         ip_limit = 5
@@ -576,43 +721,48 @@ def _enforce_recovery_rate_limits(request: Request, agent_id: UUID, action: str)
         ip_limit = 10
         agent_limit = 5
 
-    ip_result = rate_limiter.check(
-        key=f"recovery:{action}:ip:{ip}",
-        limit=ip_limit,
-        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
-    )
-    if not ip_result.allowed:
+    try:
+        await _enforce_rate_limit(
+            key=f"recovery:{action}:ip:{ip}",
+            limit=ip_limit,
+            window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+        )
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+            raise
         recovery_logger.warning(
             "recovery_abuse action=%s agent_id=%s source_ip=%s outcome=rate_limited_ip retry_after=%s",
             action,
             agent_id,
             ip,
-            ip_result.retry_after_seconds,
+            (exc.headers or {}).get("Retry-After", "1"),
         )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded",
-            headers={"Retry-After": str(ip_result.retry_after_seconds)},
-        )
+        raise
 
-    agent_result = rate_limiter.check(
-        key=f"recovery:{action}:agent:{agent_id}",
-        limit=agent_limit,
-        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
-    )
-    if not agent_result.allowed:
+    try:
+        await _enforce_rate_limit(
+            key=f"recovery:{action}:agent:{agent_id}",
+            limit=agent_limit,
+            window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+        )
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+            raise
         recovery_logger.warning(
             "recovery_abuse action=%s agent_id=%s source_ip=%s outcome=rate_limited_agent retry_after=%s",
             action,
             agent_id,
             ip,
-            agent_result.retry_after_seconds,
+            (exc.headers or {}).get("Retry-After", "1"),
         )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded",
-            headers={"Retry-After": str(agent_result.retry_after_seconds)},
-        )
+        raise
+
+
+def _upgrade_owner_key_hash_if_needed(agent: Agent, api_key: str) -> bool:
+    if not should_rehash_api_key_hash(agent.owner_key_hash):
+        return False
+    agent.owner_key_hash = hash_api_key(api_key)
+    return True
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
@@ -622,10 +772,7 @@ async def register_agent(
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, str]:
-    _enforce_rate_limit(
-        key=f"api:post_agents:key:{hash_api_key(api_key)}",
-        limit=10,
-    )
+    await _enforce_registration_rate_limits(request, api_key)
 
     sanitized_payload = sanitize_json_strings(agent_card_payload)
     try:
@@ -659,6 +806,7 @@ async def register_agent(
         assert_url_safe_for_registration(
             normalized_url,
             allow_private=settings.allow_private_network_targets,
+            allow_unresolvable=settings.allow_unresolvable_registration_hostnames,
         )
     except URLSafetyError as exc:
         raise HTTPException(
@@ -710,6 +858,12 @@ async def register_agent(
             status_code=status.HTTP_409_CONFLICT,
             detail="Agent with this URL already exists",
         ) from exc
+    except (DataError, DBAPIError) as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_invalid_agent_card_length_detail(),
+        ) from exc
 
     await session.refresh(agent)
     return {
@@ -727,7 +881,7 @@ async def start_recovery(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
-    _enforce_recovery_rate_limits(request, agent_id, action="start")
+    await _enforce_recovery_rate_limits(request, agent_id, action="start")
     agent = await session.get(Agent, agent_id)
     if agent is None:
         recovery_logger.info(
@@ -738,11 +892,13 @@ async def start_recovery(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
     challenge_token = token_urlsafe(32)
+    recovery_session_secret = token_urlsafe(32)
     now_utc = datetime.now(tz=timezone.utc)
     expires_at = now_utc + timedelta(seconds=settings.recovery_challenge_ttl_seconds)
 
     # Enforces single active challenge by replacing the prior hash/metadata.
     agent.recovery_challenge_hash = hash_api_key(challenge_token)
+    agent.recovery_session_hash = api_key_fingerprint(recovery_session_secret)
     agent.recovery_challenge_created_at = now_utc
     agent.recovery_challenge_expires_at = expires_at
     await session.commit()
@@ -755,6 +911,7 @@ async def start_recovery(
     return {
         "agent_id": str(agent.id),
         "challenge_token": challenge_token,
+        "recovery_session_secret": recovery_session_secret,
         "verify_url": _build_verify_url(agent.url),
         "expires_at": expires_at.isoformat(),
     }
@@ -766,8 +923,9 @@ async def complete_recovery(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
+    recovery_session_secret: str = Header(alias="X-Recovery-Session", min_length=1),
 ) -> dict[str, str]:
-    _enforce_recovery_rate_limits(request, agent_id, action="complete")
+    await _enforce_recovery_rate_limits(request, agent_id, action="complete")
     agent = await session.get(Agent, agent_id)
     if agent is None:
         recovery_logger.info(
@@ -780,6 +938,7 @@ async def complete_recovery(
     now_utc = datetime.now(tz=timezone.utc)
     if (
         agent.recovery_challenge_hash is None
+        or agent.recovery_session_hash is None
         or agent.recovery_challenge_expires_at is None
         or agent.recovery_challenge_expires_at <= now_utc
     ):
@@ -795,11 +954,15 @@ async def complete_recovery(
 
     verify_url = _build_verify_url(agent.url)
     try:
-        assert_url_safe_for_outbound(
+        safe_target = assert_url_safe_for_outbound(
             verify_url,
             allow_private=settings.allow_private_network_targets,
         )
-        fetched_token = await _fetch_recovery_token(verify_url)
+        fetched_token = await _fetch_recovery_token(
+            verify_url,
+            pinned_hostname=safe_target.hostname,
+            pinned_ip=safe_target.pinned_ip,
+        )
     except httpx.HTTPError as exc:
         recovery_logger.info(
             "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=verify_unreachable",
@@ -832,10 +995,49 @@ async def complete_recovery(
             detail="Recovery challenge verification mismatch",
         )
 
-    agent.owner_key_hash = hash_api_key(api_key)
-    agent.recovery_challenge_hash = None
-    agent.recovery_challenge_created_at = None
-    agent.recovery_challenge_expires_at = None
+    provided_session_hash = api_key_fingerprint(recovery_session_secret)
+    if not hmac.compare_digest(provided_session_hash, agent.recovery_session_hash):
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=session_mismatch",
+            agent_id,
+            _client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Recovery session mismatch",
+        )
+
+    expected_challenge_hash = agent.recovery_challenge_hash
+    expected_session_hash = agent.recovery_session_hash
+    update_result = await session.execute(
+        update(Agent)
+        .where(
+            Agent.id == agent_id,
+            Agent.recovery_challenge_hash == expected_challenge_hash,
+            Agent.recovery_session_hash == expected_session_hash,
+            Agent.recovery_challenge_expires_at.is_not(None),
+            Agent.recovery_challenge_expires_at > now_utc,
+        )
+        .values(
+            owner_key_hash=hash_api_key(api_key),
+            recovery_challenge_hash=None,
+            recovery_session_hash=None,
+            recovery_challenge_created_at=None,
+            recovery_challenge_expires_at=None,
+        )
+    )
+    if update_result.rowcount != 1:
+        await session.rollback()
+        recovery_logger.info(
+            "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=challenge_consumed",
+            agent_id,
+            _client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Recovery challenge already consumed",
+        )
+
     await session.commit()
     recovery_logger.info(
         "recovery_abuse action=complete agent_id=%s source_ip=%s outcome=success",
@@ -881,8 +1083,8 @@ async def update_agent(
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, str]:
-    _enforce_rate_limit(
-        key=f"api:put_agent:key:{hash_api_key(api_key)}",
+    await _enforce_rate_limit(
+        key=f"api:put_agent:key:{api_key_fingerprint(api_key)}",
         limit=20,
     )
 
@@ -892,6 +1094,7 @@ async def update_agent(
 
     if not verify_api_key(api_key, agent.owner_key_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(agent, api_key)
 
     sanitized_payload = sanitize_json_strings(agent_card_payload)
     try:
@@ -925,6 +1128,7 @@ async def update_agent(
         assert_url_safe_for_registration(
             normalized_url,
             allow_private=settings.allow_private_network_targets,
+            allow_unresolvable=settings.allow_unresolvable_registration_hostnames,
         )
     except URLSafetyError as exc:
         raise HTTPException(
@@ -960,7 +1164,14 @@ async def update_agent(
     agent.tags = validated.tags
     agent.input_modes = validated.input_modes
     agent.output_modes = validated.output_modes
-    await session.commit()
+    try:
+        await session.commit()
+    except (DataError, DBAPIError) as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_invalid_agent_card_length_detail(),
+        ) from exc
     await session.refresh(agent)
 
     return {
@@ -986,16 +1197,7 @@ async def list_agents(
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     api_key = request.headers.get("X-API-Key")
-    if api_key:
-        _enforce_rate_limit(
-            key=f"api:get_agents:key:{hash_api_key(api_key)}",
-            limit=1000,
-        )
-    else:
-        _enforce_rate_limit(
-            key=f"api:get_agents:ip:{_client_ip(request)}",
-            limit=100,
-        )
+    await _enforce_list_agents_rate_limits(request, api_key)
 
     filters: list[Any] = []
     if skill:
@@ -1086,13 +1288,11 @@ async def list_agents(
 
 @app.get("/api/v1/admin/stale-candidates", tags=["admin"])
 async def stale_candidates_report(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ) -> dict[str, Any]:
-    if settings.admin_api_token is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not configured")
-    if admin_token != settings.admin_api_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
+    await _require_admin_token(request, admin_token, scope="stale-candidates")
 
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
@@ -1135,8 +1335,8 @@ async def delete_agent(
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> Response:
-    _enforce_rate_limit(
-        key=f"api:delete_agent:key:{hash_api_key(api_key)}",
+    await _enforce_rate_limit(
+        key=f"api:delete_agent:key:{api_key_fingerprint(api_key)}",
         limit=10,
     )
 
@@ -1155,7 +1355,7 @@ async def delete_agent(
 @app.get("/api/v1/registry.json", tags=["registry"])
 async def registry_export(request: Request) -> JSONResponse:
     global latest_registry_snapshot
-    _enforce_rate_limit(
+    await _enforce_rate_limit(
         key=f"api:get_registry:ip:{_client_ip(request)}",
         limit=10,
     )
@@ -1179,9 +1379,13 @@ async def registry_export(request: Request) -> JSONResponse:
 
 
 @app.get("/api/v1/metrics", tags=["observability"])
-async def metrics() -> dict[str, Any]:
+async def metrics(
+    request: Request,
+    admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> dict[str, Any]:
+    await _require_admin_token(request, admin_token, scope="metrics")
     return {
-        "request_metrics": request_metrics,
+        "request_metrics": request_metrics.snapshot(),
         "health_summary": last_health_summary,
     }
 
