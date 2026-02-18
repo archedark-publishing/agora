@@ -40,7 +40,7 @@ Expected response:
 Open:
 
 - UI home: `http://localhost:8000/`
-- Register form: `http://localhost:8000/register`
+- Register handoff page: `http://localhost:8000/register`
 - Recovery form: `http://localhost:8000/recover`
 - API docs: `http://localhost:8000/docs`
 
