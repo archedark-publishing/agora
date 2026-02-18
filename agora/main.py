@@ -1245,15 +1245,21 @@ async def list_agents(
     if tag:
         filters.append(Agent.tags.overlap(tag))
 
+    effective_stale = stale
     if health:
+        health_values = [value for value in health if value not in {"all", "stale"}]
+        if "stale" in health and effective_stale is None:
+            effective_stale = True
+
         allowed_health_values = {"healthy", "unhealthy", "unknown"}
-        invalid_values = [value for value in health if value not in allowed_health_values]
+        invalid_values = [value for value in health_values if value not in allowed_health_values]
         if invalid_values:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid health value(s): {', '.join(invalid_values)}",
             )
-        filters.append(Agent.health_status.in_(health))
+        if health_values:
+            filters.append(Agent.health_status.in_(health_values))
 
     if q:
         query_like = f"%{q}%"
@@ -1268,9 +1274,9 @@ async def list_agents(
 
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
-    if stale is True:
+    if effective_stale is True:
         filters.append(stale_expr)
-    elif stale is False:
+    elif effective_stale is False:
         filters.append(not_(stale_expr))
 
     base_query = select(Agent)

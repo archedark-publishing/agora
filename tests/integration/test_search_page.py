@@ -33,3 +33,19 @@ async def test_search_page_lists_registered_agents(client) -> None:
 async def test_search_page_accepts_stale_health_filter_from_ui(client) -> None:
     response = await client.get("/search", params={"health": "stale"})
     assert response.status_code == 200
+
+
+async def test_agents_api_accepts_all_and_stale_health_values(client) -> None:
+    payload = build_payload("Health Filter Agent", "https://example.com/health-filter-agent")
+    register = await client.post(
+        "/api/v1/agents",
+        json=payload,
+        headers={"X-API-Key": "health-filter-key"},
+    )
+    assert register.status_code == 201
+
+    all_response = await client.get("/api/v1/agents", params=[("health", "all")])
+    assert all_response.status_code == 200
+
+    stale_response = await client.get("/api/v1/agents", params=[("health", "stale")])
+    assert stale_response.status_code == 200
