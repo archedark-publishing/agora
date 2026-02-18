@@ -3,12 +3,14 @@ from __future__ import annotations
 async def test_register_page_renders_agent_handoff_builder(client) -> None:
     response = await client.get("/register")
     assert response.status_code == 200
-    assert "Give Registration to Your Agent" in response.text
-    assert 'id="handoff_packet"' in response.text
-    assert 'id="agent_prompt"' in response.text
-    assert 'id="skill_md_url"' in response.text
+    assert "Give this to your Agent and it will handle the rest." in response.text
+    assert 'id="agent_handoff_prompt"' in response.text
+    assert "Copy message" in response.text
     assert "/api/v1/agents" in response.text
     assert "X-API-Key" in response.text
+    assert 'name="owner_api_key"' not in response.text
+    assert 'name="skill_md_url"' not in response.text
+    assert 'name="agent_url"' not in response.text
     assert 'name="agent_card_json"' not in response.text
     assert 'name="api_key"' not in response.text
 

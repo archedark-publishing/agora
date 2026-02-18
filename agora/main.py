@@ -440,13 +440,30 @@ async def agent_detail_page(
 @app.get("/register", response_class=HTMLResponse, include_in_schema=False)
 async def register_page(request: Request) -> HTMLResponse:
     registry_base_url = str(request.base_url).rstrip("/")
+    register_endpoint = f"{registry_base_url}/api/v1/agents"
+    health_endpoint = f"{registry_base_url}/api/v1/health"
+    handoff_prompt = (
+        "You are my coding agent. Handle registration to this Agora registry end-to-end without "
+        "asking me for manual form inputs.\n\n"
+        f"Registry health check: GET {health_endpoint}\n"
+        f"Registration endpoint: POST {register_endpoint}\n\n"
+        "Instructions:\n"
+        "1. Discover your own canonical public agent URL and current SKILL.md/source context.\n"
+        "2. Generate and securely store an owner API key for this registry (do not expose it in commits/logs).\n"
+        "3. Build a valid Agent Card JSON that includes required fields: protocolVersion, name, url, skills.\n"
+        "4. Ensure each skill includes id and name.\n"
+        "5. Send POST request with header X-API-Key: <owner-api-key> and body = Agent Card JSON.\n"
+        "6. Return the response payload, created agent id, and final normalized URL.\n"
+        "7. If registration fails, report the exact error and best next action."
+    )
     return templates.TemplateResponse(
         "register.html",
         {
             "request": request,
             "registry_base_url": registry_base_url,
-            "register_endpoint": f"{registry_base_url}/api/v1/agents",
-            "health_endpoint": f"{registry_base_url}/api/v1/health",
+            "register_endpoint": register_endpoint,
+            "health_endpoint": health_endpoint,
+            "handoff_prompt": handoff_prompt,
         },
     )
 
