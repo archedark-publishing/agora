@@ -67,9 +67,8 @@ jobs:
             exit 1
           fi
 
-          git fetch --prune origin
-          git checkout "$TARGET_REF"
-          git reset --hard "origin/$TARGET_REF"
+          git fetch --prune origin "$TARGET_REF"
+          git checkout -B "$TARGET_REF" "origin/$TARGET_REF"
 
           docker compose up -d --build --remove-orphans
           EOF
