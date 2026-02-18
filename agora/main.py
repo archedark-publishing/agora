@@ -313,11 +313,14 @@ async def search_page(
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> HTMLResponse:
+    valid_health_filters = {"healthy", "unhealthy", "unknown"}
     skills = [item.strip() for item in (skill or "").split(",") if item.strip()]
     capabilities = [item.strip() for item in (capability or "").split(",") if item.strip()]
     tags = [item.strip() for item in (tag or "").split(",") if item.strip()]
-    health_filters = [health] if health else None
+    health_filters = [health] if health in valid_health_filters else None
     stale_bool: bool | None = None
+    if health == "stale":
+        stale_bool = True
     if stale == "true":
         stale_bool = True
     elif stale == "false":
@@ -337,6 +340,13 @@ async def search_page(
     )
     has_previous = offset > 0
     has_next = (offset + limit) < results["total"]
+    if stale_bool is True:
+        health_filter_ui = "stale"
+    elif health_filters:
+        health_filter_ui = health_filters[0]
+    else:
+        health_filter_ui = "all"
+
     safe_results = {
         **results,
         "agents": [
@@ -355,6 +365,11 @@ async def search_page(
         {
             "request": request,
             "results": safe_results,
+            "agents": safe_results["agents"],
+            "query": q or "",
+            "health_filter": health_filter_ui,
+            "sort": request.query_params.get("sort", "recent"),
+            "has_more": has_next,
             "filters": {
                 "q": q or "",
                 "skill": skill or "",
