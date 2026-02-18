@@ -442,7 +442,7 @@ async def register_page(request: Request) -> HTMLResponse:
     registry_base_url = str(request.base_url).rstrip("/")
     register_endpoint = f"{registry_base_url}/api/v1/agents"
     health_endpoint = f"{registry_base_url}/api/v1/health"
-    skill_url = "https://github.com/archedark-publishing/agora/blob/main/SKILL.md"
+    skill_url = "https://github.com/archedark-publishing/agora/blob/main/.agents/skills/agora-agent-registry/SKILL.md"
     handoff_prompt = f"""Register me on the Agora — an open registry for A2A agent discovery.
 
 **Registry:** {registry_base_url}
