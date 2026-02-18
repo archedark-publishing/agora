@@ -75,7 +75,7 @@
 {% block content %}
 <div class="register-container flex flex-col gap-6">
 
-  {% if success %}
+  {% if success_result %}
     <!-- Success state -->
     <div class="card success-card">
       <div class="success-icon">
@@ -83,7 +83,7 @@
           <path d="M20 6L9 17l-5-5"/>
         </svg>
       </div>
-      <h1 style="font-size: 1.5rem;">{{ agent_name }} is live!</h1>
+      <h1 style="font-size: 1.5rem;">{{ success_result.name }} is live!</h1>
       <p class="text-secondary mt-2">Your agent is now discoverable in the registry.</p>
       
       <div class="key-warning mt-6">
@@ -96,7 +96,7 @@
       </div>
       
       <div class="key-display">
-        <span id="api-key">{{ api_key }}</span>
+        <span id="api-key">{{ api_key_value }}</span>
       </div>
       
       <button class="btn btn-primary" onclick="copyKey()" id="copy-btn" style="width: 100%;">
@@ -104,7 +104,7 @@
       </button>
       
       <div class="flex gap-3 mt-6 justify-center">
-        <a href="/agent/{{ agent_id }}" class="btn btn-secondary">View agent profile</a>
+        <a href="/agent/{{ success_result.id }}" class="btn btn-secondary">View agent profile</a>
         <a href="/register" class="btn btn-ghost">Register another</a>
       </div>
     </div>
@@ -118,11 +118,24 @@
       </p>
     </div>
 
-    {% if error %}
-      <div class="error-message">{{ error }}</div>
+    {% if error_message %}
+      <div class="error-message">{{ error_message }}</div>
     {% endif %}
 
     <form action="/register" method="post" class="card form-section">
+      <div class="form-group">
+        <label class="label" for="api_key">Owner API key</label>
+        <input
+          type="password"
+          id="api_key"
+          name="api_key"
+          class="input mono"
+          placeholder="your-owner-api-key"
+          value="{{ api_key_value or '' }}"
+          required
+        >
+        <span class="form-hint">Keep this key safe. You'll use it to update or delete this agent.</span>
+      </div>
       
       <div class="form-group">
         <label class="label" for="name">Agent name</label>
@@ -132,8 +145,7 @@
           name="name" 
           class="input" 
           placeholder="My Agent"
-          value="{{ (form.name or '') if form else '' }}"
-          required
+          value=""
         >
       </div>
 
@@ -145,8 +157,7 @@
           name="url" 
           class="input mono" 
           placeholder="https://example.com/agent"
-          value="{{ (form.url or '') if form else '' }}"
-          required
+          value=""
         >
         <span class="form-hint">The URL where your agent's A2A endpoint lives</span>
       </div>
@@ -158,19 +169,20 @@
           name="description" 
           class="input textarea" 
           placeholder="What does your agent do?"
-        >{{ (form.description or '') if form else '' }}</textarea>
+        ></textarea>
       </div>
 
       <div class="form-group">
-        <label class="label" for="card_json">Agent Card JSON <span class="text-tertiary">(optional)</span></label>
+        <label class="label" for="agent_card_json">Agent Card JSON</label>
         <textarea 
-          id="card_json" 
-          name="card_json" 
+          id="agent_card_json" 
+          name="agent_card_json" 
           class="input textarea mono" 
           placeholder='{"protocolVersion": "0.3.0", "skills": [...]}'
           style="min-height: 120px;"
-        >{{ (form.card_json or '') if form else '' }}</textarea>
-        <span class="form-hint">Full A2A Agent Card. If omitted, we'll generate a basic one from the fields above.</span>
+          required
+        >{{ agent_card_json or '' }}</textarea>
+        <span class="form-hint">Provide a full A2A Agent Card JSON payload.</span>
       </div>
 
       <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">
