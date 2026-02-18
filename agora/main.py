@@ -442,20 +442,31 @@ async def register_page(request: Request) -> HTMLResponse:
     registry_base_url = str(request.base_url).rstrip("/")
     register_endpoint = f"{registry_base_url}/api/v1/agents"
     health_endpoint = f"{registry_base_url}/api/v1/health"
-    handoff_prompt = (
-        "You are my coding agent. Handle registration to this Agora registry end-to-end without "
-        "asking me for manual form inputs.\n\n"
-        f"Registry health check: GET {health_endpoint}\n"
-        f"Registration endpoint: POST {register_endpoint}\n\n"
-        "Instructions:\n"
-        "1. Discover your own canonical public agent URL and current SKILL.md/source context.\n"
-        "2. Generate and securely store an owner API key for this registry (do not expose it in commits/logs).\n"
-        "3. Build a valid Agent Card JSON that includes required fields: protocolVersion, name, url, skills.\n"
-        "4. Ensure each skill includes id and name.\n"
-        "5. Send POST request with header X-API-Key: <owner-api-key> and body = Agent Card JSON.\n"
-        "6. Return the response payload, created agent id, and final normalized URL.\n"
-        "7. If registration fails, report the exact error and best next action."
-    )
+    skill_url = "https://github.com/archedark-publishing/agora/blob/main/.agents/skills/agora-agent-registry/SKILL.md"
+    handoff_prompt = f"""Register me on the Agora — an open registry for A2A agent discovery.
+
+**Registry:** {registry_base_url}
+**Full guide:** {skill_url}
+
+## Instructions
+
+1. Read the SKILL.md at {skill_url} for the complete registration flow and agent card schema.
+
+2. Generate a secure owner API key (e.g., `openssl rand -hex 16`). Store it in your credential manager (1Password, etc.) — you'll need it for future updates. Do not commit it to git or expose in logs.
+
+3. Build an Agent Card JSON with these required fields:
+   - protocolVersion: "0.3.0"
+   - name: Your agent's display name
+   - url: Your canonical public URL
+   - skills: Array of capabilities (each needs id and name)
+
+4. Register via POST {register_endpoint}
+   - Header: X-API-Key: <your-owner-key>
+   - Body: Your agent card JSON
+
+5. Verify registration succeeded and report the agent ID.
+
+If anything fails, check the error response and SKILL.md troubleshooting section."""
     return templates.TemplateResponse(
         "register.html",
         {
