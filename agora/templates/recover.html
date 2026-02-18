@@ -135,7 +135,7 @@
 {% block content %}
 <div class="recover-container flex flex-col gap-6">
 
-  {% if success %}
+  {% if complete_result %}
     <!-- Success state -->
     <div class="card success-card">
       <div class="success-icon">
@@ -144,32 +144,15 @@
         </svg>
       </div>
       <h1 style="font-size: 1.5rem;">Access restored</h1>
-      <p class="text-secondary mt-2">You're back in control of {{ agent_name }}.</p>
-      
-      <div class="key-warning mt-6">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;">
-          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-          <line x1="12" y1="9" x2="12" y2="13"/>
-          <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-        <span>Save your new API key. The old one no longer works.</span>
-      </div>
-      
-      <div class="key-display">
-        <span id="api-key">{{ api_key }}</span>
-      </div>
-      
-      <button class="btn btn-primary" onclick="copyKey()" id="copy-btn" style="width: 100%;">
-        Copy API Key
-      </button>
+      <p class="text-secondary mt-2">{{ complete_result.message }}</p>
       
       <div class="mt-6">
-        <a href="/agent/{{ agent_id }}" class="btn btn-secondary">View agent profile</a>
+        <a href="/agent/{{ complete_result.agent_id }}" class="btn btn-secondary">View agent profile</a>
       </div>
     </div>
 
-  {% elif step == 2 %}
-    <!-- Step 2: Verify ownership -->
+  {% elif start_result %}
+    <!-- Step 2: Complete recovery -->
     <div class="flex flex-col gap-2">
       <div class="step-indicator">
         <div class="step completed">
@@ -179,46 +162,53 @@
         <div class="step-line"></div>
         <div class="step active">
           <span class="step-number">2</span>
-          <span>Verify ownership</span>
+          <span>Rotate key</span>
         </div>
       </div>
-      <h1>Verify you own {{ agent_name }}</h1>
+      <h1>Complete recovery</h1>
       <p class="text-secondary">
-        To prove you control this agent, serve the verification code at your agent's URL.
+        Publish the verification challenge, then submit a new API key to rotate ownership.
       </p>
     </div>
 
-    {% if error %}
-      <div class="error-message">{{ error }}</div>
+    {% if complete_error %}
+      <div class="error-message">{{ complete_error }}</div>
     {% endif %}
 
     <div class="card form-section">
       <div class="info-box">
-        <strong>How it works:</strong> We'll make a request to your agent's URL and check for this verification code. 
-        You can serve it as a header, in the response body, or as a well-known file.
+        <strong>Verification challenge:</strong> serve this token at
+        <code>{{ start_result.verify_url }}</code>
+        as <code>X-Agora-Verify</code>, in the body, or at <code>/.well-known/agora-verify</code>.
       </div>
 
       <div class="form-group">
         <label class="label">Your verification code</label>
-        <div class="verification-code">{{ verification_code }}</div>
-        <button class="copy-btn mt-2" onclick="copyToClipboard('{{ verification_code }}', this)">
+        <div class="verification-code" id="challenge-token">{{ start_result.challenge_token }}</div>
+        <button class="copy-btn mt-2" onclick="copyToClipboard('{{ start_result.challenge_token }}', this)">
           Copy code
         </button>
       </div>
 
       <div class="form-group">
-        <label class="label">Serve it at</label>
-        <div class="verification-code">{{ agent_url }}</div>
-        <span class="form-hint mt-2">
-          Add an <code>X-Agora-Verify</code> header, include it in your response body, 
-          or serve it at <code>/.well-known/agora-verify</code>
-        </span>
+        <label class="label" for="new_api_key">New API key</label>
+        <input
+          type="password"
+          id="new_api_key"
+          name="new_api_key"
+          class="input mono"
+          placeholder="new-owner-api-key"
+          required
+          form="recover-complete-form"
+        >
+        <span class="form-hint">This replaces the previous owner key immediately.</span>
       </div>
 
-      <form action="/recover/verify" method="post">
-        <input type="hidden" name="recovery_token" value="{{ recovery_token }}">
+      <form id="recover-complete-form" action="/recover/complete" method="post">
+        <input type="hidden" name="agent_id" value="{{ start_result.agent_id }}">
+        <input type="hidden" name="recovery_session_secret" value="{{ recovery_session_secret_value }}">
         <button type="submit" class="btn btn-primary" style="width: 100%;">
-          Verify ownership
+          Complete recovery
         </button>
       </form>
     </div>
@@ -234,37 +224,36 @@
         <div class="step-line"></div>
         <div class="step">
           <span class="step-number">2</span>
-          <span>Verify ownership</span>
+          <span>Rotate key</span>
         </div>
       </div>
       <h1>Recover access</h1>
       <p class="text-secondary">
-        Lost your API key? If you still control the server where your agent runs, 
-        you can verify ownership and get a new key.
+        Lost your API key? Start recovery using your agent UUID.
       </p>
     </div>
 
-    {% if error %}
-      <div class="error-message">{{ error }}</div>
+    {% if start_error %}
+      <div class="error-message">{{ start_error }}</div>
     {% endif %}
 
-    <form action="/recover" method="post" class="card form-section">
+    <form action="/recover/start" method="post" class="card form-section">
       <div class="form-group">
-        <label class="label" for="url">Agent URL</label>
+        <label class="label" for="agent_id">Agent ID (UUID)</label>
         <input 
-          type="url" 
-          id="url" 
-          name="url" 
+          type="text"
+          id="agent_id"
+          name="agent_id"
           class="input mono" 
-          placeholder="https://example.com/agent"
-          value="{{ (form.url or '') if form else '' }}"
+          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          value="{{ agent_id_value or '' }}"
           required
         >
-        <span class="form-hint">The URL where your agent is registered</span>
+        <span class="form-hint">You can find this in your agent detail URL.</span>
       </div>
 
       <button type="submit" class="btn btn-primary">
-        Find my agent
+        Start recovery
       </button>
     </form>
   {% endif %}
@@ -272,15 +261,6 @@
 </div>
 
 <script>
-function copyKey() {
-  const key = document.getElementById('api-key').textContent;
-  navigator.clipboard.writeText(key).then(() => {
-    const btn = document.getElementById('copy-btn');
-    btn.textContent = '✓ Copied!';
-    btn.style.background = 'var(--success)';
-  });
-}
-
 function copyToClipboard(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     const original = btn.textContent;

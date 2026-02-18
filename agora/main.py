@@ -313,11 +313,14 @@ async def search_page(
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> HTMLResponse:
+    valid_health_filters = {"healthy", "unhealthy", "unknown"}
     skills = [item.strip() for item in (skill or "").split(",") if item.strip()]
     capabilities = [item.strip() for item in (capability or "").split(",") if item.strip()]
     tags = [item.strip() for item in (tag or "").split(",") if item.strip()]
-    health_filters = [health] if health else None
+    health_filters = [health] if health in valid_health_filters else None
     stale_bool: bool | None = None
+    if health == "stale":
+        stale_bool = True
     if stale == "true":
         stale_bool = True
     elif stale == "false":
@@ -337,6 +340,13 @@ async def search_page(
     )
     has_previous = offset > 0
     has_next = (offset + limit) < results["total"]
+    if stale_bool is True:
+        health_filter_ui = "stale"
+    elif health_filters:
+        health_filter_ui = health_filters[0]
+    else:
+        health_filter_ui = "all"
+
     safe_results = {
         **results,
         "agents": [
@@ -355,6 +365,11 @@ async def search_page(
         {
             "request": request,
             "results": safe_results,
+            "agents": safe_results["agents"],
+            "query": q or "",
+            "health_filter": health_filter_ui,
+            "sort": request.query_params.get("sort", "recent"),
+            "has_more": has_next,
             "filters": {
                 "q": q or "",
                 "skill": skill or "",
@@ -387,15 +402,38 @@ async def agent_detail_page(
         max_length=2000,
     )
     safe_agent_card["url"] = sanitize_ui_text(safe_agent_card.get("url"), max_length=2048)
-    detail = {
-        **detail,
-        "agent_card": safe_agent_card,
+    registered_at_raw = detail.get("registered_at")
+    registered_at = datetime.fromisoformat(registered_at_raw) if registered_at_raw else None
+    last_healthy_at_raw = detail.get("last_healthy_at")
+    last_healthy_at = datetime.fromisoformat(last_healthy_at_raw) if last_healthy_at_raw else None
+
+    tenure_days = 0
+    if registered_at is not None:
+        tenure_days = max(0, (datetime.now(tz=timezone.utc) - registered_at).days)
+
+    agent = {
+        "id": detail["id"],
+        "name": safe_agent_card.get("name") or "Unnamed agent",
+        "description": safe_agent_card.get("description"),
+        "url": safe_agent_card.get("url"),
+        "health_status": detail.get("health_status") or "unknown",
+        "is_verified": False,
+        "tenure_days": tenure_days,
+        "protocol_version": safe_agent_card.get("protocolVersion"),
+        "created_at": registered_at,
+        "last_healthy_at": last_healthy_at,
+        "version": safe_agent_card.get("version"),
+        "skills": safe_agent_card.get("skills") or [],
+        "card": safe_agent_card,
     }
+
     return templates.TemplateResponse(
         "agent_detail.html",
         {
             "request": request,
-            "detail": detail,
+            "agent": agent,
+            "health_history": [],
+            "is_owner": False,
         },
     )
 
@@ -1207,15 +1245,21 @@ async def list_agents(
     if tag:
         filters.append(Agent.tags.overlap(tag))
 
+    effective_stale = stale
     if health:
+        health_values = [value for value in health if value not in {"all", "stale"}]
+        if "stale" in health and effective_stale is None:
+            effective_stale = True
+
         allowed_health_values = {"healthy", "unhealthy", "unknown"}
-        invalid_values = [value for value in health if value not in allowed_health_values]
+        invalid_values = [value for value in health_values if value not in allowed_health_values]
         if invalid_values:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid health value(s): {', '.join(invalid_values)}",
             )
-        filters.append(Agent.health_status.in_(health))
+        if health_values:
+            filters.append(Agent.health_status.in_(health_values))
 
     if q:
         query_like = f"%{q}%"
@@ -1230,9 +1274,9 @@ async def list_agents(
 
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
-    if stale is True:
+    if effective_stale is True:
         filters.append(stale_expr)
-    elif stale is False:
+    elif effective_stale is False:
         filters.append(not_(stale_expr))
 
     base_query = select(Agent)
