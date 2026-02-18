@@ -387,15 +387,38 @@ async def agent_detail_page(
         max_length=2000,
     )
     safe_agent_card["url"] = sanitize_ui_text(safe_agent_card.get("url"), max_length=2048)
-    detail = {
-        **detail,
-        "agent_card": safe_agent_card,
+    registered_at_raw = detail.get("registered_at")
+    registered_at = datetime.fromisoformat(registered_at_raw) if registered_at_raw else None
+    last_healthy_at_raw = detail.get("last_healthy_at")
+    last_healthy_at = datetime.fromisoformat(last_healthy_at_raw) if last_healthy_at_raw else None
+
+    tenure_days = 0
+    if registered_at is not None:
+        tenure_days = max(0, (datetime.now(tz=timezone.utc) - registered_at).days)
+
+    agent = {
+        "id": detail["id"],
+        "name": safe_agent_card.get("name") or "Unnamed agent",
+        "description": safe_agent_card.get("description"),
+        "url": safe_agent_card.get("url"),
+        "health_status": detail.get("health_status") or "unknown",
+        "is_verified": False,
+        "tenure_days": tenure_days,
+        "protocol_version": safe_agent_card.get("protocolVersion"),
+        "created_at": registered_at,
+        "last_healthy_at": last_healthy_at,
+        "version": safe_agent_card.get("version"),
+        "skills": safe_agent_card.get("skills") or [],
+        "card": safe_agent_card,
     }
+
     return templates.TemplateResponse(
         "agent_detail.html",
         {
             "request": request,
-            "detail": detail,
+            "agent": agent,
+            "health_history": [],
+            "is_owner": False,
         },
     )
 
