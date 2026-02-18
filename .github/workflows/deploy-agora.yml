@@ -68,6 +68,8 @@ jobs:
 
           git fetch --prune origin "$TARGET_REF"
           git checkout -B "$TARGET_REF" FETCH_HEAD
+          echo "Deploying commit $(git rev-parse --short HEAD) on $(hostname)"
 
-          docker compose up -d --build --remove-orphans
+          docker compose up -d --build --force-recreate --remove-orphans
+          docker compose ps
           EOF
