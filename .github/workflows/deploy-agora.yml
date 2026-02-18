@@ -1,0 +1,73 @@
+name: Deploy Agora
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-agora
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required secrets
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PRIVATE_KEY: ${{ secrets.EXE_DEPLOY_PRIVATE_KEY }}
+          EXE_KNOWN_HOSTS: ${{ secrets.EXE_KNOWN_HOSTS }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          test -n "$EXE_SSH_DEST"
+          test -n "$EXE_DEPLOY_PRIVATE_KEY"
+          test -n "$EXE_KNOWN_HOSTS"
+          test -n "$EXE_DEPLOY_PATH"
+
+      - name: Configure SSH
+        env:
+          EXE_DEPLOY_PRIVATE_KEY: ${{ secrets.EXE_DEPLOY_PRIVATE_KEY }}
+          EXE_KNOWN_HOSTS: ${{ secrets.EXE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$EXE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$EXE_DEPLOY_PRIVATE_KEY"
+
+      - name: Deploy on VM
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+          REPO_HTTPS_URL: https://github.com/${{ github.repository }}.git
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$EXE_SSH_DEST" \
+            "REPO_HTTPS_URL='$REPO_HTTPS_URL' TARGET_REF='$TARGET_REF' DEPLOY_PATH='$EXE_DEPLOY_PATH' bash -se" <<'EOF'
+          set -euo pipefail
+
+          if [ ! -d "$DEPLOY_PATH/.git" ]; then
+            git clone --depth=1 "$REPO_HTTPS_URL" "$DEPLOY_PATH"
+          fi
+
+          cd "$DEPLOY_PATH"
+          if [ ! -f ".env" ]; then
+            echo "Missing $DEPLOY_PATH/.env on VM; deployment stopped." >&2
+            exit 1
+          fi
+
+          git fetch --prune origin
+          git checkout "$TARGET_REF"
+          git reset --hard "origin/$TARGET_REF"
+
+          docker compose up -d --build --remove-orphans
+          EOF
