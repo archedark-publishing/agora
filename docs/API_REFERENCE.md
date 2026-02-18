@@ -75,7 +75,7 @@ Returns stale candidates report if `ADMIN_API_TOKEN` is configured.
 - `GET /` home
 - `GET /search` search UI
 - `GET /agent/{id}` detail UI
-- `GET/POST /register` registration UI flow
+- `GET /register` agent handoff packet UI (for agent-driven registration)
 - `GET/POST /recover` recovery UI flow
 
 ## Status Codes (Common)

@@ -3,7 +3,6 @@
 import asyncio
 import hmac
 import ipaddress
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -440,70 +439,15 @@ async def agent_detail_page(
 
 @app.get("/register", response_class=HTMLResponse, include_in_schema=False)
 async def register_page(request: Request) -> HTMLResponse:
+    registry_base_url = str(request.base_url).rstrip("/")
     return templates.TemplateResponse(
         "register.html",
         {
             "request": request,
-            "agent_card_json": "",
-            "api_key_value": "",
-            "error_message": None,
-            "success_result": None,
+            "registry_base_url": registry_base_url,
+            "register_endpoint": f"{registry_base_url}/api/v1/agents",
+            "health_endpoint": f"{registry_base_url}/api/v1/health",
         },
-    )
-
-
-@app.post("/register", response_class=HTMLResponse, include_in_schema=False)
-async def register_submit_page(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    agent_card_json: str = Form(...),
-    api_key: str = Form(...),
-) -> HTMLResponse:
-    try:
-        payload = json.loads(agent_card_json)
-    except json.JSONDecodeError as exc:
-        return templates.TemplateResponse(
-            "register.html",
-            {
-                "request": request,
-                "agent_card_json": agent_card_json,
-                "api_key_value": api_key,
-                "error_message": f"Invalid JSON: {exc}",
-                "success_result": None,
-            },
-            status_code=400,
-        )
-
-    try:
-        result = await register_agent(
-            agent_card_payload=payload,
-            request=request,
-            session=session,
-            api_key=api_key,
-        )
-    except HTTPException as exc:
-        return templates.TemplateResponse(
-            "register.html",
-            {
-                "request": request,
-                "agent_card_json": agent_card_json,
-                "api_key_value": api_key,
-                "error_message": exc.detail,
-                "success_result": None,
-            },
-            status_code=exc.status_code,
-        )
-
-    return templates.TemplateResponse(
-        "register.html",
-        {
-            "request": request,
-            "agent_card_json": agent_card_json,
-            "api_key_value": api_key,
-            "error_message": None,
-            "success_result": result,
-        },
-        status_code=201,
     )
 
 

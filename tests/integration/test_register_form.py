@@ -1,40 +1,24 @@
 from __future__ import annotations
 
-import json
-
-
-def build_payload(name: str, url: str, skill_id: str = "weather") -> dict:
-    return {
-        "protocolVersion": "0.3.0",
-        "name": name,
-        "description": f"{name} description",
-        "url": url,
-        "version": "1.0.0",
-        "capabilities": {"streaming": True},
-        "skills": [{"id": skill_id, "name": f"{skill_id} skill"}],
-    }
-
-
-async def test_register_form_renders_expected_backend_field_names(client) -> None:
+async def test_register_page_renders_agent_handoff_builder(client) -> None:
     response = await client.get("/register")
     assert response.status_code == 200
-    assert 'name="agent_card_json"' in response.text
-    assert 'name="api_key"' in response.text
-    assert 'name="card_json"' not in response.text
+    assert "Give Registration to Your Agent" in response.text
+    assert 'id="handoff_packet"' in response.text
+    assert 'id="agent_prompt"' in response.text
+    assert 'id="skill_md_url"' in response.text
+    assert "/api/v1/agents" in response.text
+    assert "X-API-Key" in response.text
+    assert 'name="agent_card_json"' not in response.text
+    assert 'name="api_key"' not in response.text
 
 
-async def test_register_form_submission_registers_agent(client) -> None:
-    payload = build_payload("Form Agent", "https://example.com/form-agent", "weather")
+async def test_register_page_no_longer_accepts_manual_post_submission(client) -> None:
     response = await client.post(
         "/register",
         data={
-            "agent_card_json": json.dumps(payload),
+            "agent_card_json": "{}",
             "api_key": "form-owner-key",
         },
     )
-    assert response.status_code == 201
-    assert "Form Agent is live!" in response.text
-
-    search = await client.get("/api/v1/agents", params={"skill": "weather"})
-    assert search.status_code == 200
-    assert any(agent["name"] == "Form Agent" for agent in search.json()["agents"])
+    assert response.status_code == 405
