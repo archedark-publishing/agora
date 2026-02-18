@@ -4,7 +4,7 @@
 {% block head %}
 <style>
   .handoff-container {
-    max-width: 960px;
+    max-width: 860px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
@@ -19,407 +19,112 @@
     color: var(--ink-secondary);
     max-width: 70ch;
   }
-  .security-note {
-    border: 1px solid var(--warning);
-    background: var(--warning-subtle);
-    border-radius: var(--radius-sm);
-    color: var(--warning);
-    padding: 0.75rem 0.875rem;
-    font-size: 0.875rem;
-  }
-  .info-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-  }
-  .callout {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.75rem;
-    background: var(--bg);
-  }
-  .callout code {
-    display: block;
-    margin-top: 0.375rem;
-    font-size: 0.8125rem;
-    word-break: break-all;
-  }
-  .endpoint-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.625rem;
-  }
-  .form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.875rem;
-  }
-  .full-width {
-    grid-column: 1 / -1;
-  }
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
-  }
-  .checkbox-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .form-hint {
-    font-size: 0.8125rem;
-    color: var(--ink-tertiary);
-  }
-  .output-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-  }
-  .textarea {
-    min-height: 260px;
+  .prompt-box {
+    min-height: 360px;
     resize: vertical;
-    font-size: 0.8125rem;
-    line-height: 1.45;
+    font-size: 0.875rem;
+    line-height: 1.5;
   }
   .button-row {
     display: flex;
     flex-wrap: wrap;
     gap: 0.625rem;
-    margin-top: 0.625rem;
+    margin-top: 0.75rem;
   }
   .status-message {
+    margin-top: 0.625rem;
     font-size: 0.875rem;
     color: var(--ink-secondary);
     min-height: 1.25rem;
   }
-  .error-message {
-    border: 1px solid var(--danger);
-    background: var(--danger-subtle);
+  .registry-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+  .registry-item {
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    background: var(--bg);
     padding: 0.625rem 0.75rem;
-    color: var(--danger);
     font-size: 0.875rem;
   }
-  @media (max-width: 820px) {
-    .info-grid,
-    .form-grid,
-    .output-grid {
-      grid-template-columns: 1fr;
-    }
+  .registry-item code {
+    display: block;
+    margin-top: 0.375rem;
+    font-size: 0.8125rem;
+    word-break: break-all;
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div
-  id="registry-meta"
-  data-base-url="{{ registry_base_url }}"
-  data-register-endpoint="{{ register_endpoint }}"
-  data-health-endpoint="{{ health_endpoint }}"
-  class="handoff-container"
->
+<div class="handoff-container">
   <section class="card hero">
-    <h1>Give Registration to Your Agent</h1>
+    <h1>Give this to your Agent and it will handle the rest.</h1>
     <p>
-      Instead of registering manually, create an agent handoff packet here and give it to your coding
-      agent. It can fetch your <span class="mono">SKILL.md</span>, build an Agent Card, and call the
-      registry API directly.
+      No manual registration form is needed. Copy the message below and paste it into your coding
+      agent. Your agent should discover its own details, create/store its own owner API key, and
+      register itself directly.
     </p>
-    <div class="security-note">
-      Keep your owner API key private. This page does not submit it to the server; packet generation
-      runs in your browser.
-    </div>
   </section>
 
-  <section class="card info-grid">
-    <div class="endpoint-list">
-      <h2>Registry Details</h2>
-      <div class="callout">
-        Base URL
-        <code id="registry-base-url">{{ registry_base_url }}</code>
-      </div>
-      <div class="callout">
-        Health endpoint
-        <code>{{ health_endpoint }}</code>
-      </div>
-      <div class="callout">
-        Register endpoint
-        <code>{{ register_endpoint }}</code>
-      </div>
-      <div class="callout">
-        Auth header
-        <code>X-API-Key: &lt;owner-api-key&gt;</code>
-      </div>
+  <section class="card">
+    <h2>Message for Your Agent</h2>
+    <p class="text-secondary text-sm" style="margin-top: 0.375rem;">
+      Copy this exactly and send it to your agent.
+    </p>
+    <textarea id="agent_handoff_prompt" class="input mono prompt-box" readonly>{{ handoff_prompt }}</textarea>
+    <div class="button-row">
+      <button type="button" id="copy-prompt-btn" class="btn btn-primary">Copy message</button>
+      <a href="/search" class="btn btn-secondary">Explore registry</a>
     </div>
-
-    <form id="handoff-builder" class="form-grid" autocomplete="off">
-      <h2 class="full-width">Handoff Packet Inputs</h2>
-
-      <div class="form-group full-width">
-        <label class="label" for="owner_api_key">Owner API key</label>
-        <input
-          id="owner_api_key"
-          name="owner_api_key"
-          type="password"
-          class="input mono"
-          placeholder="owner-api-key"
-          required
-        >
-        <span class="form-hint">
-          The same key your agent should send in <span class="mono">X-API-Key</span>.
-        </span>
-      </div>
-
-      <div class="form-group full-width">
-        <label class="label" for="skill_md_url">Your SKILL.md URL</label>
-        <input
-          id="skill_md_url"
-          name="skill_md_url"
-          type="url"
-          class="input mono"
-          placeholder="https://example.com/SKILL.md"
-          required
-        >
-        <span class="form-hint">Where your coding agent can fetch implementation instructions.</span>
-      </div>
-
-      <div class="form-group">
-        <label class="label" for="agent_name">Agent name</label>
-        <input id="agent_name" name="agent_name" type="text" class="input" value="My Agent" required>
-      </div>
-      <div class="form-group">
-        <label class="label" for="agent_url">Agent URL</label>
-        <input
-          id="agent_url"
-          name="agent_url"
-          type="url"
-          class="input mono"
-          placeholder="https://agent.example.com"
-          required
-        >
-      </div>
-
-      <div class="form-group">
-        <label class="label" for="skill_id">Primary skill id</label>
-        <input id="skill_id" name="skill_id" type="text" class="input mono" value="primary-skill" required>
-      </div>
-      <div class="form-group">
-        <label class="label" for="skill_name">Primary skill name</label>
-        <input id="skill_name" name="skill_name" type="text" class="input" value="Primary Skill" required>
-      </div>
-
-      <div class="form-group">
-        <label class="label" for="protocol_version">Protocol version</label>
-        <input id="protocol_version" name="protocol_version" type="text" class="input mono" value="0.3.0" required>
-      </div>
-      <div class="form-group">
-        <label class="label" for="agent_version">Agent version</label>
-        <input id="agent_version" name="agent_version" type="text" class="input mono" value="1.0.0" required>
-      </div>
-
-      <div class="form-group full-width">
-        <label class="label" for="agent_description">Agent description</label>
-        <textarea
-          id="agent_description"
-          name="agent_description"
-          class="input"
-          rows="2"
-          placeholder="Describe your agent"
-        ></textarea>
-      </div>
-
-      <div class="form-group full-width">
-        <label class="label" for="skill_description">Primary skill description</label>
-        <textarea
-          id="skill_description"
-          name="skill_description"
-          class="input"
-          rows="2"
-          placeholder="Describe your primary skill"
-        ></textarea>
-      </div>
-
-      <div class="checkbox-row full-width">
-        <input id="supports_streaming" name="supports_streaming" type="checkbox" checked>
-        <label for="supports_streaming">Streaming capability enabled</label>
-      </div>
-
-      <div id="builder-error" class="error-message full-width" hidden></div>
-
-      <div class="button-row full-width">
-        <button type="submit" class="btn btn-primary">Generate handoff packet</button>
-        <button type="button" class="btn btn-secondary" id="copy-packet-btn">Copy packet JSON</button>
-        <button type="button" class="btn btn-secondary" id="copy-prompt-btn">Copy agent prompt</button>
-      </div>
-
-      <div id="builder-status" class="status-message full-width"></div>
-    </form>
+    <div id="copy-status" class="status-message"></div>
   </section>
 
-  <section class="output-grid">
-    <div class="card">
-      <h3>Handoff Packet JSON</h3>
-      <p class="text-secondary text-sm" style="margin: 0.375rem 0 0.75rem;">
-        Share this directly with your agent.
-      </p>
-      <textarea id="handoff_packet" class="input textarea mono" readonly></textarea>
+  <section class="card registry-details">
+    <h3>Registry Context</h3>
+    <div class="registry-item">
+      Base URL
+      <code>{{ registry_base_url }}</code>
     </div>
-    <div class="card">
-      <h3>Agent Prompt</h3>
-      <p class="text-secondary text-sm" style="margin: 0.375rem 0 0.75rem;">
-        Optional prompt if your agent works better with plain text instructions.
-      </p>
-      <textarea id="agent_prompt" class="input textarea mono" readonly></textarea>
+    <div class="registry-item">
+      Health endpoint
+      <code>{{ health_endpoint }}</code>
+    </div>
+    <div class="registry-item">
+      Register endpoint
+      <code>{{ register_endpoint }}</code>
+    </div>
+    <div class="registry-item">
+      Auth header
+      <code>X-API-Key: &lt;owner-api-key&gt;</code>
     </div>
   </section>
 </div>
 
 <script>
-function readValue(id) {
-  const element = document.getElementById(id);
-  if (!element) {
-    return "";
-  }
-  if (element.type === "checkbox") {
-    return element.checked;
-  }
-  return (element.value || "").trim();
-}
-
-function setStatus(message) {
-  document.getElementById("builder-status").textContent = message;
-}
-
-function setError(message) {
-  const error = document.getElementById("builder-error");
-  if (!message) {
-    error.hidden = true;
-    error.textContent = "";
-    return;
-  }
-  error.hidden = false;
-  error.textContent = message;
-}
-
-function buildHandoffPacket() {
-  const meta = document.getElementById("registry-meta");
-  const registryBaseUrl = meta.dataset.baseUrl;
-  const registerEndpoint = meta.dataset.registerEndpoint;
-  const healthEndpoint = meta.dataset.healthEndpoint;
-
-  const ownerApiKey = readValue("owner_api_key");
-  const skillMdUrl = readValue("skill_md_url");
-  const agentName = readValue("agent_name");
-  const agentUrl = readValue("agent_url");
-  const skillId = readValue("skill_id");
-  const skillName = readValue("skill_name");
-  const protocolVersion = readValue("protocol_version");
-  const agentVersion = readValue("agent_version");
-  const agentDescription = readValue("agent_description");
-  const skillDescription = readValue("skill_description");
-  const supportsStreaming = readValue("supports_streaming");
-
-  if (!skillMdUrl || !agentUrl || !ownerApiKey) {
-    throw new Error("Owner API key, SKILL.md URL, and agent URL are required.");
-  }
-
-  const packet = {
-    task: "Fetch SKILL.md and register this agent in Agora",
-    registry: {
-      base_url: registryBaseUrl,
-      health_endpoint: healthEndpoint,
-      register_endpoint: registerEndpoint,
-      auth_header: "X-API-Key",
-      auth_value: ownerApiKey,
-    },
-    skill_md_url: skillMdUrl,
-    agent_card: {
-      protocolVersion: protocolVersion || "0.3.0",
-      name: agentName || "My Agent",
-      description: agentDescription || null,
-      url: agentUrl,
-      version: agentVersion || "1.0.0",
-      capabilities: {
-        streaming: Boolean(supportsStreaming),
-      },
-      skills: [
-        {
-          id: skillId || "primary-skill",
-          name: skillName || "Primary Skill",
-          description: skillDescription || null,
-        },
-      ],
-    },
-    required_fields: ["protocolVersion", "name", "url", "skills"],
-    requested_outputs: [
-      "registration response JSON",
-      "new agent id",
-      "final normalized agent URL",
-    ],
-  };
-
-  const prompt = [
-    "Use this packet to self-register an agent into Agora.",
-    "1. GET the SKILL.md URL and follow its instructions.",
-    "2. Verify registry health before registration.",
-    "3. Build/adjust the agent card if needed, keeping required fields.",
-    "4. POST the card to the register endpoint with the provided X-API-Key.",
-    "5. Return the created agent id and response payload.",
-    "",
-    "Packet:",
-    JSON.stringify(packet, null, 2),
-  ].join("\n");
-
-  return {packet, prompt};
-}
-
-function generatePacket() {
-  setError("");
-  try {
-    const result = buildHandoffPacket();
-    document.getElementById("handoff_packet").value = JSON.stringify(result.packet, null, 2);
-    document.getElementById("agent_prompt").value = result.prompt;
-    setStatus("Packet generated locally in your browser.");
-  } catch (error) {
-    setStatus("");
-    setError(error.message || "Unable to generate packet.");
-  }
-}
-
-async function copyField(fieldId, buttonId, successLabel) {
-  const value = document.getElementById(fieldId).value || "";
-  if (!value) {
-    setError("Generate the packet first so there is something to copy.");
+async function copyPrompt() {
+  const status = document.getElementById("copy-status");
+  const prompt = document.getElementById("agent_handoff_prompt").value || "";
+  if (!prompt) {
+    status.textContent = "Nothing to copy.";
     return;
   }
   try {
-    await navigator.clipboard.writeText(value);
-    const button = document.getElementById(buttonId);
-    const previousText = button.textContent;
-    button.textContent = successLabel;
-    setStatus("Copied to clipboard.");
+    await navigator.clipboard.writeText(prompt);
+    const button = document.getElementById("copy-prompt-btn");
+    const previous = button.textContent;
+    button.textContent = "Copied";
+    status.textContent = "Message copied. Paste it into your agent.";
     setTimeout(() => {
-      button.textContent = previousText;
-    }, 1400);
+      button.textContent = previous;
+    }, 1300);
   } catch (_error) {
-    setError("Clipboard copy failed. Copy the text manually.");
+    status.textContent = "Clipboard unavailable. Copy the message manually.";
   }
 }
 
-document.getElementById("handoff-builder").addEventListener("submit", function(event) {
-  event.preventDefault();
-  generatePacket();
-});
-
-document.getElementById("copy-packet-btn").addEventListener("click", function() {
-  copyField("handoff_packet", "copy-packet-btn", "Copied packet");
-});
-
-document.getElementById("copy-prompt-btn").addEventListener("click", function() {
-  copyField("agent_prompt", "copy-prompt-btn", "Copied prompt");
-});
-
-generatePacket();
+document.getElementById("copy-prompt-btn").addEventListener("click", copyPrompt);
 </script>
 {% endblock %}
