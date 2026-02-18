@@ -38,10 +38,10 @@ jobs:
         run: |
           set -euo pipefail
           install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$EXE_DEPLOY_PRIVATE_KEY" > "$HOME/.ssh/exe_deploy_key"
+          chmod 600 "$HOME/.ssh/exe_deploy_key"
           printf '%s\n' "$EXE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-          eval "$(ssh-agent -s)"
-          ssh-add - <<< "$EXE_DEPLOY_PRIVATE_KEY"
 
       - name: Deploy on VM
         env:
@@ -52,7 +52,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$EXE_SSH_DEST" \
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -i "$HOME/.ssh/exe_deploy_key" "$EXE_SSH_DEST" \
             "REPO_HTTPS_URL='$REPO_HTTPS_URL' TARGET_REF='$TARGET_REF' DEPLOY_PATH='$EXE_DEPLOY_PATH' bash -se" <<'EOF'
           set -euo pipefail
 
