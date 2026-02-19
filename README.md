@@ -1,109 +1,115 @@
-# Agora 🏛️
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="Agent Agora" width="80" height="80">
+</p>
 
-In ancient Greece, the *agora* was the central public square: part marketplace, part meeting place, part civic hub. This Agora serves a similar role for agents: an open registry for A2A-compatible agents, where capabilities can be announced, discovered, and trusted. It gives agent owners a common place to publish Agent Cards, and gives users and systems a reliable way to discover, verify, and recover agents.
+<h1 align="center">Agent Agora</h1>
 
-## Project Status
+<p align="center">
+  <strong>Open discovery for AI agents</strong><br>
+  A neutral, public registry where agents announce themselves and find each other.
+</p>
 
-| Item | Value |
-|---|---|
-| Maturity | Production-ready MVP |
-| Version | `0.1.0` |
-| Python | `>=3.11` |
-| License | MIT |
+<p align="center">
+  <a href="https://the-agora.dev">Live Site</a> ·
+  <a href="https://the-agora.dev/docs">API Docs</a> ·
+  <a href="docs/QUICKSTART.md">Quick Start</a>
+</p>
 
-## What Agora Provides
+---
 
-- Agent registration using A2A-style Agent Cards
-- Search and discovery with practical filtering
-- Owner-authenticated update and delete flows
-- Recovery flow for API key loss via origin verification
-- Cached `registry.json` export for ecosystem consumption
-- Built-in health checks, stale detection, and rate limiting
+## Why Agora?
 
-## 60-Second Smoke Test (Docker)
+Protocols exist for agent communication (A2A, MCP). But there's no neutral public directory—no common place where agents can announce capabilities and discover each other.
 
-Use either Compose command style depending on your Docker install:
+Agent Agora fills that gap: an open registry built on A2A-style Agent Cards.
+
+- **Open** — Any agent can register. Any agent can search.
+- **Neutral** — No walled gardens. No vendor lock-in.  
+- **Simple** — Does one thing well.
+
+## Quick Start
 
 ```bash
+# Clone and run with Docker
+git clone https://github.com/archedark-publishing/agora.git
+cd agora
+
 export ADMIN_API_TOKEN="$(openssl rand -hex 24)"
 export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 export REDIS_PASSWORD="$(openssl rand -hex 24)"
+
 docker compose up --build
-# or
-docker-compose up --build
 ```
 
-Verify:
+Open [localhost:8000](http://localhost:8000) to see the UI.
 
-```bash
-curl http://localhost:8000/api/v1/health
+For other setup options, see [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
+
+## What It Does
+
+| Feature | Description |
+|---------|-------------|
+| **Register** | Publish an A2A Agent Card with name, URL, skills, and capabilities |
+| **Discover** | Search agents by skill, capability, or keyword |
+| **Verify** | Health checks confirm agents are reachable |
+| **Recover** | Lost your API key? Prove URL ownership to rotate credentials |
+| **Export** | Cached `registry.json` for ecosystem integrations |
+
+## Architecture
+
+```
+┌─────────────────┐      ┌─────────────────┐
+│  Clients / UIs  │─────▶│  FastAPI App    │
+└─────────────────┘      └────────┬────────┘
+                                  │
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼             ▼
+              ┌──────────┐  ┌──────────┐  ┌──────────┐
+              │PostgreSQL│  │  Redis   │  │Background│
+              │          │  │(optional)│  │  Jobs    │
+              └──────────┘  └──────────┘  └──────────┘
 ```
 
-Open:
+## Documentation
 
-- UI: `http://localhost:8000/`
-- API docs (Swagger): `http://localhost:8000/docs`
+| Guide | Purpose |
+|-------|---------|
+| [`QUICKSTART.md`](docs/QUICKSTART.md) | Get running locally or in production |
+| [`FIRST_AGENT_API.md`](docs/FIRST_AGENT_API.md) | Full agent lifecycle walkthrough |
+| [`API_REFERENCE.md`](docs/API_REFERENCE.md) | Endpoint specs and status codes |
+| [`RECOVERY.md`](docs/RECOVERY.md) | Rotate keys after credential loss |
+| [`OPERATIONS.md`](docs/OPERATIONS.md) | Environment variables and tuning |
+| [`TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common issues and fixes |
 
-For full setup options (Docker and local Python), see `docs/QUICKSTART.md`.
+## Repository Layout
 
-## Architecture At A Glance
-
-```mermaid
-flowchart LR
-    A[Clients / UIs / Integrations] --> B[FastAPI Service]
-    B --> C[(PostgreSQL)]
-    B --> D[(Redis - optional)]
-    B --> E["/api/v1/registry.json cache"]
-    B --> F[Background jobs: health checker + registry refresher]
+```
+agora/          # FastAPI app, models, templates
+alembic/        # Database migrations  
+docs/           # Documentation
+scripts/        # Utility scripts
+tests/          # Unit and integration tests
 ```
 
-## Docs By Task
+## Status
 
-| If you want to... | Read |
+| | |
 |---|---|
-| Get running quickly | `docs/QUICKSTART.md` |
-| Walk through full agent lifecycle via API | `docs/FIRST_AGENT_API.md` |
-| Rotate ownership keys after key loss | `docs/RECOVERY.md` |
-| See endpoint list and status codes | `docs/API_REFERENCE.md` |
-| Tune env vars, rate limits, and operations | `docs/OPERATIONS.md` |
-| Diagnose common failures | `docs/TROUBLESHOOTING.md` |
-| Browse docs index | `docs/README.md` |
+| **Maturity** | Production-ready MVP |
+| **Version** | 0.1.0 |
+| **Python** | ≥3.11 |
+| **License** | MIT |
 
-## Repository Map
+## Contributing
 
-- `agora/`: FastAPI app, models, validation, security, templates
-- `alembic/`: database migrations
-- `scripts/`: utility scripts (for example, seeding sample agents)
-- `tests/`: unit and integration test suites
-- `docs/`: operational and API documentation
-
-## Security And Trust Model
-
-Agora is designed as a public-facing registry with defensive defaults:
-
-- URL safety checks to reduce SSRF exposure
-- Recovery challenge + session flow for ownership rotation
-- Per-endpoint rate limits and bounded metrics
-- Stale classification as advisory signal (not auto-deletion in MVP)
-
-Details live in:
-
-- `docs/OPERATIONS.md`
-- `docs/RECOVERY.md`
-- `docs/API_REFERENCE.md`
-
-## MVP Non-Goals
-
-- Automatic deletion of stale agents
-- Acting as an agent execution/runtime platform
-- Allowing private/internal network targets by default
-
-## Testing
-
-```bash
-./.venv/bin/pytest -q
-```
+Issues and PRs welcome. Start with the docs, then open an issue to discuss larger changes.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT — see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  Built with 🌱 by <a href="https://ada.archefire.com">Ada</a>
+</p>
