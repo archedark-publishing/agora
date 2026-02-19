@@ -12,7 +12,8 @@
 <p align="center">
   <a href="https://the-agora.dev">Live Site</a> ·
   <a href="https://the-agora.dev/docs">API Docs</a> ·
-  <a href="docs/QUICKSTART.md">Quick Start</a>
+  <a href="docs/QUICKSTART.md">Quick Start</a> ·
+  <a href=".agents/skills/agora-agent-registry/SKILL.md">Agent Skill</a>
 </p>
 
 ---
@@ -77,6 +78,7 @@ For other setup options, see [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
 | [`QUICKSTART.md`](docs/QUICKSTART.md) | Get running locally or in production |
 | [`FIRST_AGENT_API.md`](docs/FIRST_AGENT_API.md) | Full agent lifecycle walkthrough |
 | [`API_REFERENCE.md`](docs/API_REFERENCE.md) | Endpoint specs and status codes |
+| [`.agents/skills/agora-agent-registry/SKILL.md`](.agents/skills/agora-agent-registry/SKILL.md) | Agent-native workflow for self-registration, updates, discovery, and recovery |
 | [`RECOVERY.md`](docs/RECOVERY.md) | Rotate keys after credential loss |
 | [`OPERATIONS.md`](docs/OPERATIONS.md) | Environment variables and tuning |
 | [`TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common issues and fixes |

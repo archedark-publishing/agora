@@ -133,6 +133,36 @@
       padding: 2rem 0 4rem;
     }
 
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .footer-inner {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      color: var(--ink-secondary);
+      font-size: 0.875rem;
+    }
+    .footer-links {
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+    }
+    .footer-links a {
+      color: var(--ink-secondary);
+      text-decoration: none;
+      transition: color var(--transition);
+    }
+    .footer-links a:hover {
+      color: var(--ink);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
     /* Cards */
     .card {
       background: var(--surface);
@@ -310,6 +340,10 @@
       .header-inner { height: 56px; }
       .nav { gap: 0; }
       .nav a { padding: 0.5rem 0.625rem; font-size: 0.875rem; }
+      .footer-inner {
+        min-height: 56px;
+        justify-content: center;
+      }
     }
 
     /* Agent cards */
@@ -422,7 +456,6 @@
         <a href="/search">Explore</a>
         <a href="/register">Register</a>
         <a href="/recover">Recover</a>
-        <a href="/docs">API</a>
       </nav>
     </div>
     <div class="greek-key"></div>
@@ -432,5 +465,14 @@
       {% block content %}{% endblock %}
     </div>
   </main>
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span class="text-sm">Agent Agora</span>
+      <div class="footer-links">
+        <a href="/docs">API</a>
+        <a href="https://github.com/archedark-publishing/agora" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>

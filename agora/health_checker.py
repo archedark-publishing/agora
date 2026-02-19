@@ -32,7 +32,20 @@ class HealthCheckSummary:
 
 
 def build_agent_card_probe_url(agent_url: str) -> str:
-    """Build the canonical health probe URL for an agent origin."""
+    """Build the primary canonical health probe URL for an agent origin."""
+
+    return build_agent_card_probe_urls(agent_url)[0]
+
+
+def build_agent_card_probe_urls(agent_url: str) -> list[str]:
+    """
+    Build ordered health probe URLs for an agent.
+
+    Probe order:
+    1. `/.well-known/agent-card.json` on the agent origin (primary contract target)
+    2. The registered `agent.url` itself (query/fragment removed)
+    3. Root `/` on the agent origin
+    """
 
     parts = urlsplit(agent_url)
     host = parts.hostname or ""
@@ -41,7 +54,23 @@ def build_agent_card_probe_url(agent_url: str) -> str:
     port_fragment = ""
     if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
         port_fragment = f":{port}"
-    return f"{scheme}://{host}{port_fragment}/.well-known/agent-card.json"
+
+    origin = f"{scheme}://{host}{port_fragment}"
+    normalized_path = parts.path or "/"
+    normalized_agent_url = f"{origin}{normalized_path}"
+
+    candidates = [
+        f"{origin}/.well-known/agent-card.json",
+        normalized_agent_url,
+        f"{origin}/",
+    ]
+
+    # Preserve order while removing duplicates (for example when agent.url is "/").
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
 
 
 async def _check_single_agent(
@@ -58,28 +87,30 @@ async def _check_single_agent(
         bool: True when healthy, False when unhealthy.
     """
 
-    probe_url = build_agent_card_probe_url(agent.url)
+    probe_urls = build_agent_card_probe_urls(agent.url)
     previous_last_healthy = agent.last_healthy_at
-    try:
-        safe_target = assert_url_safe_for_outbound(
-            probe_url,
-            allow_private=allow_private_network_targets,
-        )
-        async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
-            response = await client.get(probe_url, follow_redirects=False)
-        response.raise_for_status()
-        payload = response.json()
-        validate_agent_card(payload)
-    except (httpx.HTTPError, ValueError, AgentCardValidationError, URLSafetyError):
-        agent.health_status = "unhealthy"
-        agent.last_health_check = now_utc
-        agent.last_healthy_at = previous_last_healthy
-        return False
+    for probe_url in probe_urls:
+        try:
+            safe_target = assert_url_safe_for_outbound(
+                probe_url,
+                allow_private=allow_private_network_targets,
+            )
+            async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+                response = await client.get(probe_url, follow_redirects=False)
+            response.raise_for_status()
+            payload = response.json()
+            validate_agent_card(payload)
+            agent.health_status = "healthy"
+            agent.last_health_check = now_utc
+            agent.last_healthy_at = now_utc
+            return True
+        except (httpx.HTTPError, ValueError, AgentCardValidationError, URLSafetyError):
+            continue
 
-    agent.health_status = "healthy"
+    agent.health_status = "unhealthy"
     agent.last_health_check = now_utc
-    agent.last_healthy_at = now_utc
-    return True
+    agent.last_healthy_at = previous_last_healthy
+    return False
 
 
 async def run_health_check_cycle(

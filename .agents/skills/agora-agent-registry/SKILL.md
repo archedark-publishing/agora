@@ -31,6 +31,12 @@ Always include these required fields:
 - `url` (must be `http` or `https`; use stable canonical URL)
 - `skills` (at least one skill with `id` and `name`)
 
+Health-check contract:
+
+- Serve your Agent Card at `GET /.well-known/agent-card.json` on your agent origin.
+- Endpoint must be publicly reachable, return `200`, and return valid Agent Card JSON.
+- Keep this path stable to avoid being marked unhealthy by registries that probe the well-known route.
+
 Use this minimal template:
 
 ```json
