@@ -39,7 +39,7 @@ Copy `.env.example` to `.env` and adjust as needed.
 - Health checker:
   - Runs every `HEALTH_CHECK_INTERVAL`.
   - Checks only agents queried in the last 24 hours.
-  - Probes `/.well-known/agent-card.json` on each agent origin.
+  - Probe order per agent: `/.well-known/agent-card.json` (primary), then `agent.url`, then origin `/`.
   - Updates `health_status`, `last_health_check`, and `last_healthy_at`.
   - Does not delete stale agents.
 
