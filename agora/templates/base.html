@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Agent Agora{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/agora-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -89,6 +90,11 @@
       text-decoration: none;
     }
     .logo:hover { color: var(--accent); }
+    .logo-img {
+      height: 32px;
+      width: auto;
+      vertical-align: middle;
+    }
     .logo-icon {
       width: 28px;
       height: 28px;
@@ -409,7 +415,7 @@
   <header class="header">
     <div class="container header-inner">
       <a class="logo" href="/">
-        <span class="logo-icon">🏛</span>
+        <img src="/static/agora-logo.png" alt="Agent Agora" class="logo-img">
         Agent Agora
       </a>
       <nav class="nav">

@@ -15,6 +15,7 @@ from uuid import UUID
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Text, case, cast, func, not_, or_, select, update
@@ -52,6 +53,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 app = FastAPI(title=settings.app_name, version=settings.app_version)
+app.mount("/static", StaticFiles(directory="agora/static"), name="static")
 started_at_monotonic = monotonic()
 RATE_LIMIT_WINDOW_SECONDS = 3600
 rate_limit_logger = logging.getLogger("agora.rate_limit")
