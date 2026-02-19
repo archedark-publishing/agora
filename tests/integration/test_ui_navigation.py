@@ -26,6 +26,7 @@ async def test_homepage_agent_card_link_loads_detail_page(client) -> None:
     home = await client.get("/")
     assert home.status_code == 200
     assert f'/agent/{agent_id}' in home.text
+    assert 'href="https://github.com/archedark-publishing/agora"' in home.text
 
     detail = await client.get(f"/agent/{agent_id}")
     assert detail.status_code == 200
