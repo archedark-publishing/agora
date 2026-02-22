@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from secrets import token_urlsafe
+from textwrap import dedent
 from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
@@ -14,7 +15,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
@@ -247,6 +248,125 @@ async def api_root() -> dict[str, str]:
         "version": settings.app_version,
         "status": "ok",
     }
+
+
+def _build_skill_markdown(base_url: str) -> str:
+    docs_url = f"{base_url}/docs"
+    register_endpoint = f"{base_url}/api/v1/agents"
+    search_endpoint = f"{base_url}/api/v1/agents"
+    update_endpoint = f"{base_url}/api/v1/agents/{{agent_id}}"
+    delete_endpoint = f"{base_url}/api/v1/agents/{{agent_id}}"
+
+    return (
+        dedent(
+            f"""\
+            ---
+            name: agent-agora
+            version: {settings.app_version}
+            description: Open registry for discovering and registering AI agents via Agent Cards.
+            homepage: {base_url}
+            ---
+
+            # Agent Agora Skill
+
+            Agent Agora is a public registry where agents can publish Agent Cards and discover other agents.
+
+            ## Authentication (api_key)
+
+            - Registration, update, and deregistration require the `X-API-Key` header.
+            - Discovery and `GET /skill.md` are public and do not require authentication.
+
+            ## Register an agent
+
+            **Endpoint:** `POST {register_endpoint}`
+
+            **Required Agent Card fields:**
+            - `protocolVersion`
+            - `name`
+            - `url`
+            - `skills` (at least one skill object with `id` and `name`)
+
+            **Example request:**
+
+            ```http
+            POST /api/v1/agents
+            Content-Type: application/json
+            X-API-Key: your-owner-api-key
+            ```
+
+            ```json
+            {{
+              "protocolVersion": "0.3.0",
+              "name": "Example Agent",
+              "description": "Does useful agent work",
+              "url": "https://example.com/agent",
+              "version": "1.0.0",
+              "skills": [
+                {{
+                  "id": "example-skill",
+                  "name": "Example Skill"
+                }}
+              ]
+            }}
+            ```
+
+            **Example response (`201 Created`):**
+
+            ```json
+            {{
+              "id": "6fca8d4c-2854-4db2-b9eb-d76f053f7490",
+              "name": "Example Agent",
+              "url": "https://example.com/agent",
+              "registered_at": "2026-02-22T18:00:00+00:00",
+              "message": "Agent registered successfully"
+            }}
+            ```
+
+            ## Query the registry
+
+            **Search endpoint:** `GET {search_endpoint}`
+
+            Common query parameters:
+            - `q` (keyword search)
+            - `skill`
+            - `capability`
+            - `tag`
+            - `health`
+            - `limit`, `offset`
+
+            Example:
+
+            ```http
+            GET /api/v1/agents?skill=example-skill&limit=20&offset=0
+            ```
+
+            ## Update an agent
+
+            **Endpoint:** `PUT {update_endpoint}`
+
+            - Requires `X-API-Key` matching the key used during registration.
+            - Agent URL is immutable.
+
+            ## Deregister an agent
+
+            **Endpoint:** `DELETE {delete_endpoint}`
+
+            - Requires `X-API-Key`.
+            - Returns `204 No Content` on success.
+
+            ## Full API docs
+
+            - OpenAPI docs: {docs_url}
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+@app.get("/skill.md", response_class=PlainTextResponse, include_in_schema=False)
+async def skill_markdown(request: Request) -> PlainTextResponse:
+    base_url = str(request.base_url).rstrip("/")
+    return PlainTextResponse(_build_skill_markdown(base_url), media_type="text/markdown")
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
