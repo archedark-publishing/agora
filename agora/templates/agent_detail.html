@@ -174,6 +174,111 @@
     </div>
   </section>
 
+  <!-- Reputation -->
+  <section class="flex flex-col gap-3">
+    <h2>Reputation</h2>
+    <div class="card">
+      <div class="detail-grid">
+        <span class="detail-label">Reliability reports (30d)</span>
+        <span class="detail-value">{{ reputation.reliability.total_reports }}</span>
+
+        <span class="detail-label">Response rate</span>
+        <span class="detail-value">
+          {% if reputation.reliability.response_rate is not none %}
+            {{ (reputation.reliability.response_rate * 100)|round(1) }}%
+          {% else %}
+            n/a
+          {% endif %}
+        </span>
+
+        <span class="detail-label">Latency p50 / p95</span>
+        <span class="detail-value">
+          {% if reputation.reliability.latency_p50 is not none %}
+            {{ reputation.reliability.latency_p50|round(0) }}ms / {{ reputation.reliability.latency_p95|round(0) if reputation.reliability.latency_p95 is not none else 'n/a' }}
+          {% else %}
+            n/a
+          {% endif %}
+        </span>
+
+        <span class="detail-label">Validity rate</span>
+        <span class="detail-value">
+          {% if reputation.reliability.validity_rate is not none %}
+            {{ (reputation.reliability.validity_rate * 100)|round(1) }}%
+          {% else %}
+            n/a
+          {% endif %}
+        </span>
+
+        <span class="detail-label">Terms honored rate</span>
+        <span class="detail-value">
+          {% if reputation.reliability.terms_honor_rate is not none %}
+            {{ (reputation.reliability.terms_honor_rate * 100)|round(1) }}%
+          {% else %}
+            n/a
+          {% endif %}
+        </span>
+
+        <span class="detail-label">Incident count</span>
+        <span class="detail-value">{{ reputation.incidents.total }}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom: 0.75rem;">Recent public incidents</h3>
+      {% if reputation.incidents.recent %}
+        <div class="flex flex-col gap-3">
+          {% for incident in reputation.incidents.recent %}
+            <div style="border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem;">
+              <div class="flex items-center justify-between gap-2">
+                <strong style="font-size: 0.875rem;">{{ incident.category }}</strong>
+                <span class="text-xs text-tertiary">{{ incident.reported_at[:10] }}</span>
+              </div>
+              <p class="text-sm text-secondary mt-1">{{ incident.description }}</p>
+              {% if incident.subject_response %}
+                <p class="text-xs mt-2"><strong>Subject response:</strong> {{ incident.subject_response }}</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-secondary text-sm">No public incidents reported yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom: 0.75rem;">Submit incident report (authenticated)</h3>
+      <p class="text-xs text-tertiary" style="margin-bottom: 0.75rem;">
+        Submission requires a valid reporter API key.
+      </p>
+      <form id="incident-form" class="flex flex-col gap-3">
+        <input type="password" id="incident-api-key" class="input" placeholder="Reporter API key" required>
+        <div class="grid grid-cols-3 gap-3">
+          <select id="incident-category" class="input" required>
+            {% for category in incident_categories %}
+              <option value="{{ category }}">{{ category }}</option>
+            {% endfor %}
+          </select>
+          <select id="incident-outcome" class="input">
+            <option value="">(no outcome yet)</option>
+            {% for outcome in incident_outcomes %}
+              <option value="{{ outcome }}">{{ outcome }}</option>
+            {% endfor %}
+          </select>
+          <select id="incident-visibility" class="input" required>
+            {% for visibility in incident_visibilities %}
+              <option value="{{ visibility }}">{{ visibility }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <textarea id="incident-description" class="input" rows="5" minlength="50" maxlength="2000" placeholder="Describe the incident (50-2000 chars)" required></textarea>
+        <div class="flex items-center gap-2">
+          <button type="submit" class="btn btn-secondary">Submit incident</button>
+          <span id="incident-form-status" class="text-xs text-tertiary"></span>
+        </div>
+      </form>
+    </div>
+  </section>
+
   <!-- Skills / Capabilities -->
   {% if agent.skills %}
   <section class="flex flex-col gap-3">
@@ -226,6 +331,45 @@ function copyToClipboard(text, btn) {
       btn.innerHTML = original;
       btn.classList.remove('copied');
     }, 2000);
+  });
+}
+
+const incidentForm = document.getElementById('incident-form');
+if (incidentForm) {
+  incidentForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const statusEl = document.getElementById('incident-form-status');
+    const apiKey = document.getElementById('incident-api-key').value;
+    const category = document.getElementById('incident-category').value;
+    const outcome = document.getElementById('incident-outcome').value;
+    const visibility = document.getElementById('incident-visibility').value;
+    const description = document.getElementById('incident-description').value;
+
+    statusEl.textContent = 'Submitting…';
+    try {
+      const response = await fetch('/api/v1/agents/{{ agent.id }}/incidents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+        },
+        body: JSON.stringify({
+          category,
+          description,
+          outcome: outcome || null,
+          visibility,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        statusEl.textContent = payload.detail || 'Submission failed';
+        return;
+      }
+      statusEl.textContent = 'Incident submitted. Refresh to see updates.';
+      incidentForm.reset();
+    } catch (error) {
+      statusEl.textContent = 'Submission failed';
+    }
   });
 }
 

@@ -138,6 +138,15 @@
               <span class="mono text-xs text-tertiary" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 {{ agent.url }}
               </span>
+              <span class="text-xs text-tertiary">
+                Reliability:
+                {% if agent.reliability_response_rate is not none %}
+                  {{ (agent.reliability_response_rate * 100)|round(0) }}%
+                {% else %}
+                  n/a
+                {% endif %}
+              </span>
+              <span class="text-xs text-tertiary">Public incidents: {{ agent.public_incident_count }}</span>
               {% if agent.last_healthy_at %}
                 <span class="text-xs text-tertiary">
                   {% if agent.last_healthy_at %}Last healthy {{ agent.last_healthy_at.strftime('%b %d') }}{% endif %}

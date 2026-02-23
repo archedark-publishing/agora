@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     recovery_challenge_ttl_seconds: int = 900
     outbound_http_timeout_seconds: int = 10
     registry_refresh_interval: int = 3600
+    reliability_scores_refresh_interval: int = 3600
     admin_api_token: str | None = None
     allow_private_network_targets: bool = False
     allow_unresolvable_registration_hostnames: bool = False

@@ -65,6 +65,15 @@
               <span class="text-xs text-tertiary">
                 {% if agent.created_at %}Registered{% else %}Recently added{% endif %}
               </span>
+              <span class="text-xs text-tertiary">
+                Reliability:
+                {% if agent.reliability_response_rate is not none %}
+                  {{ (agent.reliability_response_rate * 100)|round(0) }}%
+                {% else %}
+                  n/a
+                {% endif %}
+              </span>
+              <span class="text-xs text-tertiary">Public incidents: {{ agent.public_incident_count }}</span>
             </div>
           </a>
         {% endfor %}
