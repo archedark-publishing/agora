@@ -4,18 +4,26 @@ import ipaddress
 
 import httpx
 import pytest_asyncio
-from sqlalchemy import delete
+from sqlalchemy import delete, text
 
 import agora.main as main_module
 from agora.database import AsyncSessionLocal, close_engine
 from agora.main import app
-from agora.models import Agent
+from agora.models import Agent, AgentIncident, AgentReliabilityReport
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def clean_state(monkeypatch) -> None:
     async with AsyncSessionLocal() as session:
-        await session.execute(delete(Agent))
+        try:
+            await session.execute(delete(AgentIncident))
+            await session.execute(delete(AgentReliabilityReport))
+            await session.execute(delete(Agent))
+            await session.execute(text("REFRESH MATERIALIZED VIEW agent_reliability_scores"))
+        except Exception:
+            # Migration may not be applied in all test contexts.
+            await session.rollback()
+            await session.execute(delete(Agent))
         await session.commit()
 
     monkeypatch.setattr(

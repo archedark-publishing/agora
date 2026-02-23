@@ -27,6 +27,8 @@ async def test_search_page_lists_registered_agents(client) -> None:
     assert response.status_code == 200
     assert "Search Page Agent" in response.text
     assert f'/agent/{agent_id}' in response.text
+    assert "Reliability:" in response.text
+    assert "Public incidents:" in response.text
     assert "No agents registered yet" not in response.text
 
 

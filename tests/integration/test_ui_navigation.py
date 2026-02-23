@@ -31,3 +31,5 @@ async def test_homepage_agent_card_link_loads_detail_page(client) -> None:
     detail = await client.get(f"/agent/{agent_id}")
     assert detail.status_code == 200
     assert "Homepage Agent" in detail.text
+    assert "Reputation" in detail.text
+    assert "Submit incident report (authenticated)" in detail.text
