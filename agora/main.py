@@ -10,7 +10,7 @@ from secrets import token_urlsafe
 from textwrap import dedent
 from time import monotonic
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from uuid import UUID
 
 import httpx
@@ -115,6 +115,12 @@ class IncidentCreate(BaseModel):
 
 class IncidentResponseCreate(BaseModel):
     response_text: str = Field(min_length=10, max_length=2000)
+
+
+class RegisterAgentRequest(BaseModel):
+    model_config = {"extra": "allow"}
+
+    agent_card_url: str | None = Field(default=None, max_length=2048)
 
 
 def _track_agent_query(agent_id: UUID) -> None:
@@ -730,6 +736,22 @@ async def skill_markdown(request: Request) -> PlainTextResponse:
     return PlainTextResponse(_build_skill_markdown(base_url), media_type="text/markdown")
 
 
+@app.get("/.well-known/agent.json", tags=["meta"], include_in_schema=False)
+async def well_known_agent_card(request: Request) -> JSONResponse:
+    base_url = str(request.base_url).rstrip("/")
+    return JSONResponse(
+        {
+            "name": "Agent Agora",
+            "description": "Agent registry and discovery",
+            "url": base_url,
+            "capabilities": ["registry", "discovery"],
+            "contact": {
+                "url": f"{base_url}/api/v1/agents",
+            },
+        }
+    )
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def home_page(
     request: Request,
@@ -914,6 +936,7 @@ async def agent_detail_page(
         "last_healthy_at": last_healthy_at,
         "version": safe_agent_card.get("version"),
         "skills": safe_agent_card.get("skills") or [],
+        "agent_card_url": detail.get("agent_card_url"),
         "card": safe_agent_card,
     }
     reputation = await _build_reputation_payload(
@@ -963,6 +986,7 @@ async def register_page(request: Request) -> HTMLResponse:
 4. Register via POST {register_endpoint}
    - Header: X-API-Key: <your-owner-key>
    - Body: Your agent card JSON
+   - Optional: include `agent_card_url` with your public base URL to let Agora fetch `/.well-known/agent.json`
 
 5. Verify registration succeeded and report the agent ID.
 
@@ -975,6 +999,7 @@ If anything fails, check the error response and SKILL.md troubleshooting section
             "register_endpoint": register_endpoint,
             "health_endpoint": health_endpoint,
             "handoff_prompt": handoff_prompt,
+            "agent_card_url_hint": "",
         },
     )
 
@@ -1137,6 +1162,121 @@ def _invalid_agent_card_length_detail() -> dict[str, Any]:
     }
 
 
+def _resolve_agent_card_well_known_url(agent_card_url: str) -> str:
+    if agent_card_url.endswith("/.well-known/agent.json"):
+        return agent_card_url
+    base = agent_card_url.rstrip("/")
+    return urljoin(f"{base}/", ".well-known/agent.json")
+
+
+async def _fetch_agent_card_from_url(agent_card_url: str) -> dict[str, Any]:
+    try:
+        resolved = _resolve_agent_card_well_known_url(agent_card_url)
+        safe_target = assert_url_safe_for_outbound(
+            resolved,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid agent_card_url",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": str(exc),
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
+
+    timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
+    try:
+        async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                response = await client.get(resolved)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid agent_card_url",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": "Agent Card endpoint unreachable",
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
+
+    if response.status_code != status.HTTP_200_OK:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": "Agent Card endpoint must return HTTP 200",
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        )
+
+    content_type = response.headers.get("content-type", "")
+    if "application/json" not in content_type.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": "Agent Card endpoint must return application/json",
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": "Agent Card endpoint returned invalid JSON",
+                        "type": "value_error.json",
+                    }
+                ],
+            },
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": "Agent Card payload must be a JSON object",
+                        "type": "type_error.dict",
+                    }
+                ],
+            },
+        )
+
+    return payload
+
+
 async def _fetch_recovery_token(
     verify_url: str,
     *,
@@ -1296,14 +1436,43 @@ def _upgrade_owner_key_hash_if_needed(agent: Agent, api_key: str) -> bool:
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
 async def register_agent(
-    agent_card_payload: dict[str, Any],
+    payload: dict[str, Any],
     request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, str]:
     await _enforce_registration_rate_limits(request, api_key)
 
-    sanitized_payload = sanitize_json_strings(agent_card_payload)
+    sanitized_payload = sanitize_json_strings(payload)
+    try:
+        registration_request = RegisterAgentRequest.model_validate(sanitized_payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid registration payload",
+                "errors": [
+                    {
+                        "field": "agent_card_url",
+                        "message": "Invalid agent_card_url",
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
+    agent_card_url = registration_request.agent_card_url
+
+    if agent_card_url:
+        fetched_agent_card = await _fetch_agent_card_from_url(agent_card_url)
+        for key, value in fetched_agent_card.items():
+            if key == "name" and sanitized_payload.get("name"):
+                continue
+            if key == "description" and sanitized_payload.get("description"):
+                continue
+            sanitized_payload[key] = value
+
+    sanitized_payload.pop("agent_card_url", None)
+
     try:
         validated = validate_agent_card(sanitized_payload)
     except AgentCardValidationError as exc:
@@ -1376,6 +1545,7 @@ async def register_agent(
         tags=validated.tags,
         input_modes=validated.input_modes,
         output_modes=validated.output_modes,
+        agent_card_url=agent_card_url,
         owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
@@ -1601,6 +1771,7 @@ async def get_agent_detail(
         "updated_at": agent.updated_at.isoformat(),
         "is_stale": is_stale,
         "stale_days": stale_days,
+        "agent_card_url": agent.agent_card_url,
     }
 
 
@@ -2074,6 +2245,7 @@ async def list_agents(
                 "stale_days": stale_days,
                 "reliability_response_rate": summary.get("reliability_response_rate"),
                 "public_incident_count": summary.get("public_incident_count", 0),
+                "agent_card_url": agent.agent_card_url,
             }
         )
 

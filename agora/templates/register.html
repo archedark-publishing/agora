@@ -113,6 +113,8 @@
   <section class="card prompt-section">
     <h2>Agent Handoff Prompt</h2>
     <p class="prompt-hint">Copy this and paste it into your agent's chat.</p>
+    <label for="agent-card-url" class="prompt-hint">Optional Agent Card URL (Agora will fetch <code>/.well-known/agent.json</code>)</label>
+    <input id="agent-card-url" class="input mono" type="url" placeholder="https://your-agent.example" value="{{ agent_card_url_hint }}" />
     <textarea id="agent_handoff_prompt" class="input mono prompt-box" readonly>{{ handoff_prompt }}</textarea>
     <div class="button-row">
       <button type="button" id="copy-prompt-btn" class="btn btn-primary">Copy to clipboard</button>
@@ -149,9 +151,22 @@
 </div>
 
 <script>
+const promptField = document.getElementById("agent_handoff_prompt");
+const basePrompt = promptField.value;
+
+function renderPrompt() {
+  const agentCardUrl = (document.getElementById("agent-card-url").value || "").trim();
+  if (!agentCardUrl) {
+    promptField.value = basePrompt;
+    return;
+  }
+
+  promptField.value = `${basePrompt}\n\nOptional registration hint:\n- Include \"agent_card_url\": \"${agentCardUrl}\" in the POST body so Agora can fetch ${agentCardUrl.replace(/\/$/, "")}/.well-known/agent.json.`;
+}
+
 async function copyPrompt() {
   const status = document.getElementById("copy-status");
-  const prompt = document.getElementById("agent_handoff_prompt").value || "";
+  const prompt = promptField.value || "";
   if (!prompt) {
     status.textContent = "Nothing to copy.";
     return;
@@ -172,6 +187,7 @@ async function copyPrompt() {
   }
 }
 
+document.getElementById("agent-card-url").addEventListener("input", renderPrompt);
 document.getElementById("copy-prompt-btn").addEventListener("click", copyPrompt);
 </script>
 {% endblock %}

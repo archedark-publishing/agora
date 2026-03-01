@@ -90,6 +90,7 @@ class Agent(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     input_modes: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     output_modes: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    agent_card_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     # Ownership + metadata
     owner_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
