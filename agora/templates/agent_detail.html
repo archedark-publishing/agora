@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import health_badge, verified_badge, tenure_badge %}
+{% from "_badges.html" import health_badge, verified_badge, tenure_badge, a2a_badge %}
 {% block title %}{{ agent.name }} — Agent Agora{% endblock %}
 
 {% block head %}
@@ -110,6 +110,7 @@
           {{ health_badge(agent.health_status) }}
           {{ verified_badge(agent.is_verified) }}
           {{ tenure_badge(agent.tenure_days) }}
+          {{ a2a_badge(agent.agent_card_url) }}
         </div>
       </div>
       

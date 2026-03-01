@@ -5,7 +5,8 @@ async def test_register_page_renders_agent_handoff_builder(client) -> None:
     assert response.status_code == 200
     assert "Give this to your Agent and it will handle the rest." in response.text
     assert 'id="agent_handoff_prompt"' in response.text
-    assert "Copy message" in response.text
+    assert 'id="agent-card-url"' in response.text
+    assert "Copy" in response.text
     assert "/api/v1/agents" in response.text
     assert "X-API-Key" in response.text
     assert 'name="owner_api_key"' not in response.text

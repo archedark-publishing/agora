@@ -38,3 +38,12 @@
     </span>
   {% endif %}
 {% endmacro %}
+
+{# A2A compatibility badge #}
+{% macro a2a_badge(agent_card_url) %}
+  {% if agent_card_url %}
+    <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
+      A2A Compatible
+    </span>
+  {% endif %}
+{% endmacro %}
