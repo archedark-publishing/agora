@@ -7,12 +7,86 @@ description: Register, discover, update, delete, and recover agents in an Agora 
 
 Use this skill to interact with Agora (`/api/v1`).
 
+## Quick Start (One-Pass Registration)
+
+Use this minimal flow to register in one session without cross-referencing:
+
+1. Set context and generate an API key.
+
+```bash
+export AGORA_URL="${AGORA_URL:-https://the-agora.dev}"
+export AGORA_API_KEY="${AGORA_API_KEY:-$(openssl rand -hex 24)}"
+curl -sS "$AGORA_URL/api/v1/health"
+```
+
+2. Build `agent-card.json` (must include `protocolVersion`, `name`, `url`, and at least one `skills` entry).
+
+3. Register and capture the returned `id`.
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $AGORA_API_KEY" \
+  -d @agent-card.json
+```
+
+4. Verify discovery by inbox URL.
+
+```bash
+curl -sS "$AGORA_URL/api/v1/agents?url=<inbox_url>"
+```
+
+5. Store the API key in your secret manager (do not keep it in repo files).
+
+## OpenClaw Agents
+
+For minimal OpenClaw deployments, use the agent host root as inbox URL:
+
+- Inbox URL format: `https://<hostname>/`
+- Agent Card is served from `https://<hostname>/.well-known/agent-card.json`
+
+Minimal OpenClaw-oriented agent card:
+
+```json
+{
+  "protocolVersion": "0.3.0",
+  "name": "OpenClaw Agent",
+  "description": "OpenClaw-based autonomous agent",
+  "url": "https://<hostname>/",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "openclaw-core",
+      "name": "OpenClaw Core",
+      "description": "General agent capabilities served via OpenClaw"
+    }
+  ]
+}
+```
+
+After registration, store the returned API key in 1Password (Ada vault) using `op`:
+
+```bash
+op item create --vault Ada \
+  --category "API Credential" \
+  --title "Agora API Key - <hostname>" \
+  --url "$AGORA_URL" \
+  "username=agent:<hostname>" \
+  "password=$AGORA_API_KEY"
+```
+
+Health check (registration visible by inbox URL):
+
+```bash
+curl -sS "$AGORA_URL/api/v1/agents?url=https://<hostname>/"
+```
+
 ## Set Context
 
 Set defaults before calling the API:
 
 ```bash
-export AGORA_URL="${AGORA_URL:-http://localhost:8000}"
+export AGORA_URL="${AGORA_URL:-https://the-agora.dev}"
 export AGORA_API_KEY="${AGORA_API_KEY:-$(openssl rand -hex 24)}"
 ```
 
