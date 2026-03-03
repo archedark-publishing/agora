@@ -121,6 +121,14 @@ class RegisterAgentRequest(BaseModel):
     model_config = {"extra": "allow"}
 
     agent_card_url: str | None = Field(default=None, max_length=2048)
+    econ_id: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "Optional economic identity reference. May be an econ-cli handle, "
+            "wallet address, DID, or any external economic identity identifier."
+        ),
+    )
 
 
 def _track_agent_query(agent_id: UUID) -> None:
@@ -1461,6 +1469,9 @@ async def register_agent(
             },
         ) from exc
     agent_card_url = registration_request.agent_card_url
+    econ_id = registration_request.econ_id
+    if econ_id is not None:
+        econ_id = econ_id.strip() or None
 
     if agent_card_url:
         fetched_agent_card = await _fetch_agent_card_from_url(agent_card_url)
@@ -1472,6 +1483,7 @@ async def register_agent(
             sanitized_payload[key] = value
 
     sanitized_payload.pop("agent_card_url", None)
+    sanitized_payload.pop("econ_id", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -1532,6 +1544,8 @@ async def register_agent(
 
     normalized_card = validated.card.model_dump(by_alias=True, mode="json")
     normalized_card["url"] = normalized_url
+    if econ_id is not None:
+        normalized_card["econ_id"] = econ_id
 
     agent = Agent(
         name=validated.card.name,
@@ -1546,6 +1560,7 @@ async def register_agent(
         input_modes=validated.input_modes,
         output_modes=validated.output_modes,
         agent_card_url=agent_card_url,
+        econ_id=econ_id,
         owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
@@ -1772,6 +1787,7 @@ async def get_agent_detail(
         "is_stale": is_stale,
         "stale_days": stale_days,
         "agent_card_url": agent.agent_card_url,
+        "econ_id": agent.econ_id,
     }
 
 
@@ -2053,6 +2069,25 @@ async def update_agent(
     _upgrade_owner_key_hash_if_needed(agent, api_key)
 
     sanitized_payload = sanitize_json_strings(agent_card_payload)
+    econ_id = sanitized_payload.get("econ_id")
+    if econ_id is not None:
+        econ_id = str(econ_id).strip() or None
+        if len(econ_id) > 255:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Invalid Agent Card",
+                    "errors": [
+                        {
+                            "field": "econ_id",
+                            "message": "String should have at most 255 characters",
+                            "type": "value_error.any_str.max_length",
+                        }
+                    ],
+                },
+            )
+    sanitized_payload.pop("econ_id", None)
+
     try:
         validated = validate_agent_card(sanitized_payload)
     except AgentCardValidationError as exc:
@@ -2109,6 +2144,8 @@ async def update_agent(
 
     normalized_card = validated.card.model_dump(by_alias=True, mode="json")
     normalized_card["url"] = normalized_url
+    if econ_id is not None:
+        normalized_card["econ_id"] = econ_id
 
     agent.name = validated.card.name
     agent.description = validated.card.description
@@ -2120,6 +2157,7 @@ async def update_agent(
     agent.tags = validated.tags
     agent.input_modes = validated.input_modes
     agent.output_modes = validated.output_modes
+    agent.econ_id = econ_id
     try:
         await session.commit()
     except (DataError, DBAPIError) as exc:
@@ -2149,6 +2187,14 @@ async def list_agents(
     health: list[str] | None = Query(default=None),
     q: str | None = Query(default=None),
     stale: bool | None = Query(default=None),
+    has_econ_id: bool | None = Query(default=None, description="Filter by whether econ_id is set"),
+    econ_id: str | None = Query(
+        default=None,
+        description=(
+            "Exact economic identity match. May be an econ-cli handle, wallet "
+            "address, DID, or any external economic identity identifier."
+        ),
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -2189,6 +2235,20 @@ async def list_agents(
                 cast(Agent.tags, Text).ilike(query_like),
             )
         )
+
+    if has_econ_id is True:
+        filters.append(Agent.econ_id.is_not(None))
+    elif has_econ_id is False:
+        filters.append(Agent.econ_id.is_(None))
+
+    if econ_id is not None:
+        normalized_econ_id = econ_id.strip()
+        if not normalized_econ_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="econ_id cannot be empty",
+            )
+        filters.append(Agent.econ_id == normalized_econ_id)
 
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
@@ -2246,6 +2306,7 @@ async def list_agents(
                 "reliability_response_rate": summary.get("reliability_response_rate"),
                 "public_incident_count": summary.get("public_incident_count", 0),
                 "agent_card_url": agent.agent_card_url,
+                "econ_id": agent.econ_id,
             }
         )
 
