@@ -17,7 +17,7 @@ Explicit DB probe (`503` if DB is unavailable).
 
 - `POST /api/v1/agents`  
 Headers: `X-API-Key`  
-Body: A2A Agent Card JSON  
+Body: A2A Agent Card JSON plus optional `econ_id` string (external economic identity reference).  
 Creates a new agent.
 
 - `GET /api/v1/agents`  
@@ -28,6 +28,8 @@ Query params:
   - `health` (repeatable: `healthy|unhealthy|unknown`)
   - `q` (ILIKE text search)
   - `stale` (`true|false`)
+  - `has_econ_id` (`true|false`)
+  - `econ_id` (exact string match)
   - `limit` (1-200, default 50)
   - `offset` (>=0, default 0)
 
@@ -36,11 +38,11 @@ Semantics:
   - AND across filter types
 
 - `GET /api/v1/agents/{id}`  
-Returns full stored agent card + metadata.
+Returns full stored agent card + metadata, including `econ_id` (or `null`).
 
 - `PUT /api/v1/agents/{id}`  
 Headers: `X-API-Key`  
-Body: full replacement agent card JSON.  
+Body: full replacement agent card JSON; optional `econ_id` may be set/updated/cleared.  
 URL is immutable and must match stored normalized URL.
 
 - `DELETE /api/v1/agents/{id}`  

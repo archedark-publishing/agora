@@ -64,6 +64,7 @@ class Agent(Base):
         Index("idx_agents_health", "health_status"),
         Index("idx_agents_name", "name"),
         Index("idx_agents_last_healthy_at", "last_healthy_at"),
+        Index("idx_agents_econ_id", "econ_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -91,6 +92,7 @@ class Agent(Base):
     input_modes: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     output_modes: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     agent_card_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    econ_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Ownership + metadata
     owner_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
