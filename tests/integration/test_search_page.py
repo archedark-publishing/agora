@@ -37,6 +37,11 @@ async def test_search_page_accepts_stale_health_filter_from_ui(client) -> None:
     assert response.status_code == 200
 
 
+async def test_search_page_accepts_q_filter(client) -> None:
+    response = await client.get("/search", params={"q": "test"})
+    assert response.status_code == 200
+
+
 async def test_agents_api_accepts_all_and_stale_health_values(client) -> None:
     payload = build_payload("Health Filter Agent", "https://example.com/health-filter-agent")
     register = await client.post(
