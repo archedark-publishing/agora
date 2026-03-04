@@ -855,6 +855,8 @@ async def search_page(
         health=health_filters,
         q=q,
         stale=stale_bool,
+        has_econ_id=None,
+        econ_id=None,
         limit=limit,
         offset=offset,
     )
