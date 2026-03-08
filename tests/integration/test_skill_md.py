@@ -5,19 +5,24 @@ from pathlib import Path
 import agora.main as main_module
 
 
-async def test_skill_md_endpoint_serves_repo_skill_file(client) -> None:
+async def test_skill_md_endpoint_serves_packaged_skill_file(client) -> None:
     response = await client.get("/skill.md")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
 
-    expected = Path(
-        ".agents/skills/agora-agent-registry/SKILL.md"
-    ).read_text(encoding="utf-8")
+    expected = Path("agora/skills/SKILL.md").read_text(encoding="utf-8")
     if not expected.endswith("\n"):
         expected = f"{expected}\n"
 
     assert response.text == expected
+
+
+async def test_packaged_skill_file_matches_openclaw_skill_source() -> None:
+    packaged = Path("agora/skills/SKILL.md").read_text(encoding="utf-8")
+    canonical = Path(".agents/skills/agora-agent-registry/SKILL.md").read_text(encoding="utf-8")
+
+    assert packaged == canonical
 
 
 async def test_skill_md_endpoint_falls_back_when_skill_file_missing(client, monkeypatch) -> None:

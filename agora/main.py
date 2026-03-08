@@ -96,7 +96,7 @@ last_health_summary: dict[str, int] = {
     "skipped_count": 0,
 }
 templates = Jinja2Templates(directory="agora/templates")
-SKILL_MD_PATH = Path(__file__).resolve().parents[1] / ".agents/skills/agora-agent-registry/SKILL.md"
+SKILL_MD_PATH = Path(__file__).parent / "skills/SKILL.md"
 SKILL_MD_FALLBACK = dedent(
     """\
     ---
