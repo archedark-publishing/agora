@@ -22,7 +22,7 @@ def _valid_card(url: str) -> dict[str, object]:
     }
 
 
-def _agent(url: str) -> Agent:
+def _agent(url: str, *, econ_id: str | None = None) -> Agent:
     return Agent(
         name="Health Test Agent",
         description="Health checker unit test agent.",
@@ -37,6 +37,8 @@ def _agent(url: str) -> Agent:
         output_modes=[],
         owner_key_hash=None,
         health_status="unknown",
+        econ_id=econ_id,
+        erc8004_verified=False,
     )
 
 
@@ -88,10 +90,11 @@ async def test_check_single_agent_uses_fallback_when_well_known_fails(monkeypatc
         )
 
     assert healthy is True
-    assert attempts == ["/.well-known/agent-card.json", "/agents/demo"]
+    assert attempts == ["/.well-known/agent-card.json", "/agents/demo", "/.well-known/agent-registration.json"]
     assert agent.health_status == "healthy"
     assert agent.last_health_check == now_utc
     assert agent.last_healthy_at == now_utc
+    assert agent.erc8004_verified is False
 
 
 async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypatch) -> None:
@@ -124,7 +127,74 @@ async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypat
         )
 
     assert healthy is False
-    assert attempts == ["/.well-known/agent-card.json", "/agents/demo", "/"]
+    assert attempts == [
+        "/.well-known/agent-card.json",
+        "/agents/demo",
+        "/",
+        "/.well-known/agent-registration.json",
+    ]
     assert agent.health_status == "unhealthy"
     assert agent.last_health_check == now_utc
     assert agent.last_healthy_at == previous_last_healthy
+    assert agent.erc8004_verified is False
+
+
+async def test_check_single_agent_verifies_or_populates_econ_id_from_erc8004_registration(monkeypatch) -> None:
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/.well-known/agent-card.json":
+            return httpx.Response(200, json=_valid_card("https://example.com/agents/demo"), request=request)
+        if request.url.path == "/.well-known/agent-registration.json":
+            return httpx.Response(
+                200,
+                json={
+                    "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+                    "registrations": [
+                        {
+                            "agentRegistry": "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+                            "agentId": 22,
+                        }
+                    ],
+                },
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    monkeypatch.setattr(
+        "agora.health_checker.assert_url_safe_for_outbound",
+        lambda _url, allow_private=False: SimpleNamespace(
+            hostname="example.com",
+            pinned_ip="93.184.216.34",
+        ),
+    )
+    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+
+    now_utc = datetime.now(tz=timezone.utc)
+
+    # Existing econ_id matches discovered registration
+    matching_agent = _agent(
+        "https://example.com/agents/demo",
+        econ_id="eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        healthy = await _check_single_agent(
+            matching_agent,
+            client,
+            now_utc,
+            allow_private_network_targets=False,
+        )
+    assert healthy is True
+    assert matching_agent.erc8004_verified is True
+    assert matching_agent.econ_id == "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22"
+
+    # Missing econ_id is auto-populated
+    missing_agent = _agent("https://example.com/agents/demo")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        healthy = await _check_single_agent(
+            missing_agent,
+            client,
+            now_utc,
+            allow_private_network_targets=False,
+        )
+    assert healthy is True
+    assert missing_agent.erc8004_verified is True
+    assert missing_agent.econ_id == "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22"

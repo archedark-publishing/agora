@@ -40,7 +40,8 @@ Copy `.env.example` to `.env` and adjust as needed.
   - Runs every `HEALTH_CHECK_INTERVAL`.
   - Checks only agents queried in the last 24 hours.
   - Probe order per agent: `/.well-known/agent-card.json` (primary), then `agent.url`, then origin `/`.
-  - Updates `health_status`, `last_health_check`, and `last_healthy_at`.
+  - Also attempts ERC-8004 discovery at `https://<agent-domain>/.well-known/agent-registration.json`.
+  - Updates `health_status`, `last_health_check`, `last_healthy_at`, `econ_id` (when auto-populated), and `erc8004_verified`.
   - Does not delete stale agents.
 
 - Registry refresher:

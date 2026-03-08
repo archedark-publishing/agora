@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agora.config import get_settings
 from agora.database import AsyncSessionLocal, close_engine, get_db_session, run_health_query
+from agora.erc8004 import discover_erc8004_registration_econ_id, resolve_erc8004_verification
 from agora.health_checker import run_health_check_cycle
 from agora.metrics import BoundedRequestMetrics
 from agora.models import (
@@ -142,8 +143,9 @@ class RegisterAgentRequest(BaseModel):
         default=None,
         max_length=255,
         description=(
-            "Optional economic identity reference. May be an econ-cli handle, "
-            "wallet address, DID, or any external economic identity identifier."
+            "Optional economic identity reference. For ERC-8004 use the format "
+            "{agentRegistry}:{agentId} (for example "
+            "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
     )
 
@@ -739,6 +741,7 @@ async def home_page(
                 "registered_at": agent.registered_at.isoformat(),
                 "reliability_response_rate": summary.get("reliability_response_rate"),
                 "public_incident_count": summary.get("public_incident_count", 0),
+                "erc8004_verified": agent.erc8004_verified,
             }
         )
 
@@ -1222,6 +1225,22 @@ async def _fetch_agent_card_from_url(agent_card_url: str) -> dict[str, Any]:
     return payload
 
 
+async def _compute_erc8004_verification(
+    endpoint_url: str,
+    econ_id: str | None,
+) -> tuple[str | None, bool]:
+    timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        discovered_econ_id = await discover_erc8004_registration_econ_id(
+            endpoint_url,
+            client=client,
+            allow_private_network_targets=settings.allow_private_network_targets,
+        )
+
+    verification = resolve_erc8004_verification(econ_id, discovered_econ_id)
+    return verification.econ_id, verification.verified
+
+
 async def _fetch_recovery_token(
     verify_url: str,
     *,
@@ -1487,6 +1506,8 @@ async def register_agent(
             detail="Agent with this URL already exists",
         )
 
+    econ_id, erc8004_verified = await _compute_erc8004_verification(normalized_url, econ_id)
+
     normalized_card = validated.card.model_dump(by_alias=True, mode="json")
     normalized_card["url"] = normalized_url
     if econ_id is not None:
@@ -1506,6 +1527,7 @@ async def register_agent(
         output_modes=validated.output_modes,
         agent_card_url=agent_card_url,
         econ_id=econ_id,
+        erc8004_verified=erc8004_verified,
         owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
@@ -1733,6 +1755,7 @@ async def get_agent_detail(
         "stale_days": stale_days,
         "agent_card_url": agent.agent_card_url,
         "econ_id": agent.econ_id,
+        "erc8004_verified": agent.erc8004_verified,
     }
 
 
@@ -2011,6 +2034,7 @@ async def update_agent(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     _upgrade_owner_key_hash_if_needed(agent, api_key)
 
+    previous_econ_id = agent.econ_id
     sanitized_payload = sanitize_json_strings(agent_card_payload)
     econ_id = sanitized_payload.get("econ_id")
     if econ_id is not None:
@@ -2101,6 +2125,8 @@ async def update_agent(
     agent.input_modes = validated.input_modes
     agent.output_modes = validated.output_modes
     agent.econ_id = econ_id
+    if previous_econ_id != econ_id:
+        agent.erc8004_verified = False
     try:
         await session.commit()
     except (DataError, DBAPIError) as exc:
@@ -2134,8 +2160,9 @@ async def list_agents(
     econ_id: str | None = Query(
         default=None,
         description=(
-            "Exact economic identity match. May be an econ-cli handle, wallet "
-            "address, DID, or any external economic identity identifier."
+            "Exact economic identity match. For ERC-8004 this is "
+            "{agentRegistry}:{agentId} (for example "
+            "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
     ),
     limit: int = Query(default=50, ge=1, le=200),
@@ -2250,6 +2277,7 @@ async def list_agents(
                 "public_incident_count": summary.get("public_incident_count", 0),
                 "agent_card_url": agent.agent_card_url,
                 "econ_id": agent.econ_id,
+                "erc8004_verified": agent.erc8004_verified,
             }
         )
 

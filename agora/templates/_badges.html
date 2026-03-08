@@ -47,3 +47,12 @@
     </span>
   {% endif %}
 {% endmacro %}
+
+{# ERC-8004 verification badge #}
+{% macro erc8004_badge(is_verified) %}
+  {% if is_verified %}
+    <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
+      ERC-8004
+    </span>
+  {% endif %}
+{% endmacro %}

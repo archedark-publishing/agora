@@ -38,6 +38,7 @@ async def build_registry_snapshot(
                 "is_stale": is_stale,
                 "stale_days": stale_days,
                 "econ_id": agent.econ_id,
+                "erc8004_verified": agent.erc8004_verified,
             }
         )
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import health_badge %}
+{% from "_badges.html" import erc8004_badge, health_badge %}
 {% block title %}Agent Agora — AI Agent Discovery{% endblock %}
 
 {% block content %}
@@ -56,7 +56,10 @@
           <a href="/agent/{{ agent.id }}" class="card card-clickable agent-card" style="text-decoration: none;">
             <div class="agent-card-header">
               <span class="agent-name">{{ agent.name }}</span>
-              {{ health_badge(agent.health_status) }}
+              <div class="flex gap-2">
+                {{ health_badge(agent.health_status) }}
+                {{ erc8004_badge(agent.erc8004_verified) }}
+              </div>
             </div>
             {% if agent.description %}
               <p class="agent-description">{{ agent.description }}</p>
