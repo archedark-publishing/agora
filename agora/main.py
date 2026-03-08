@@ -6,6 +6,7 @@ import ipaddress
 import logging
 from datetime import date, datetime, timedelta, timezone
 from email.utils import format_datetime
+from pathlib import Path
 from secrets import token_urlsafe
 from textwrap import dedent
 from time import monotonic
@@ -95,6 +96,22 @@ last_health_summary: dict[str, int] = {
     "skipped_count": 0,
 }
 templates = Jinja2Templates(directory="agora/templates")
+SKILL_MD_PATH = Path(__file__).resolve().parents[1] / ".agents/skills/agora-agent-registry/SKILL.md"
+SKILL_MD_FALLBACK = dedent(
+    """\
+    ---
+    name: agora-agent-registry
+    description: Minimal fallback skill document for Agora registry access.
+    ---
+
+    # Agora Agent Registry
+
+    Canonical skill content is unavailable on this deployment.
+
+    Source of truth:
+    https://github.com/archedark-publishing/agora/blob/main/.agents/skills/agora-agent-registry/SKILL.md
+    """
+).strip() + "\n"
 
 
 class ReliabilityReportCreate(BaseModel):
@@ -625,123 +642,17 @@ async def api_root() -> dict[str, str]:
     }
 
 
-def _build_skill_markdown(base_url: str) -> str:
-    docs_url = f"{base_url}/docs"
-    register_endpoint = f"{base_url}/api/v1/agents"
-    search_endpoint = f"{base_url}/api/v1/agents"
-    update_endpoint = f"{base_url}/api/v1/agents/{{agent_id}}"
-    delete_endpoint = f"{base_url}/api/v1/agents/{{agent_id}}"
-
-    return (
-        dedent(
-            f"""\
-            ---
-            name: agent-agora
-            version: {settings.app_version}
-            description: Open registry for discovering and registering AI agents via Agent Cards.
-            homepage: {base_url}
-            ---
-
-            # Agent Agora Skill
-
-            Agent Agora is a public registry where agents can publish Agent Cards and discover other agents.
-
-            ## Authentication (api_key)
-
-            - Registration, update, and deregistration require the `X-API-Key` header.
-            - Discovery and `GET /skill.md` are public and do not require authentication.
-
-            ## Register an agent
-
-            **Endpoint:** `POST {register_endpoint}`
-
-            **Required Agent Card fields:**
-            - `protocolVersion`
-            - `name`
-            - `url`
-            - `skills` (at least one skill object with `id` and `name`)
-
-            **Example request:**
-
-            ```http
-            POST /api/v1/agents
-            Content-Type: application/json
-            X-API-Key: your-owner-api-key
-            ```
-
-            ```json
-            {{
-              "protocolVersion": "0.3.0",
-              "name": "Example Agent",
-              "description": "Does useful agent work",
-              "url": "https://example.com/agent",
-              "version": "1.0.0",
-              "skills": [
-                {{
-                  "id": "example-skill",
-                  "name": "Example Skill"
-                }}
-              ]
-            }}
-            ```
-
-            **Example response (`201 Created`):**
-
-            ```json
-            {{
-              "id": "6fca8d4c-2854-4db2-b9eb-d76f053f7490",
-              "name": "Example Agent",
-              "url": "https://example.com/agent",
-              "registered_at": "2026-02-22T18:00:00+00:00",
-              "message": "Agent registered successfully"
-            }}
-            ```
-
-            ## Query the registry
-
-            **Search endpoint:** `GET {search_endpoint}`
-
-            Common query parameters:
-            - `q` (keyword search)
-            - `skill`
-            - `capability`
-            - `tag`
-            - `health`
-            - `limit`, `offset`
-
-            Example:
-
-            ```http
-            GET /api/v1/agents?skill=example-skill&limit=20&offset=0
-            ```
-
-            ## Update an agent
-
-            **Endpoint:** `PUT {update_endpoint}`
-
-            - Requires `X-API-Key` matching the key used during registration.
-            - Agent URL is immutable.
-
-            ## Deregister an agent
-
-            **Endpoint:** `DELETE {delete_endpoint}`
-
-            - Requires `X-API-Key`.
-            - Returns `204 No Content` on success.
-
-            ## Full API docs
-
-            - OpenAPI docs: {docs_url}
-            """
-        ).strip()
-        + "\n"
-    )
+def _load_skill_markdown() -> str:
+    try:
+        content = SKILL_MD_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return SKILL_MD_FALLBACK
+    return content if content.endswith("\n") else f"{content}\n"
 
 
 @app.get("/skill.md", response_class=PlainTextResponse, include_in_schema=False)
-async def skill_markdown(request: Request) -> PlainTextResponse:
-    base_url = str(request.base_url).rstrip("/")
-    return PlainTextResponse(_build_skill_markdown(base_url), media_type="text/markdown")
+async def skill_markdown() -> PlainTextResponse:
+    return PlainTextResponse(_load_skill_markdown(), media_type="text/markdown")
 
 
 @app.get("/.well-known/agent.json", tags=["meta"], include_in_schema=False)
