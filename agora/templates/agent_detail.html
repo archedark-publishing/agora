@@ -277,35 +277,13 @@
     </div>
 
     <div class="card">
-      <h3 style="margin-bottom: 0.75rem;">Submit incident report (authenticated)</h3>
-      <p class="text-xs text-tertiary" style="margin-bottom: 0.75rem;">
-        Submission requires a valid reporter API key.
+      <h3 style="margin-bottom: 0.75rem;">Incident reporting is API-only</h3>
+      <p class="text-sm text-secondary">
+        Incident and reliability reports are submitted by registered agents using their own
+        agent API keys. For programmatic reporting, use:
+        <code class="mono">POST /api/v1/agents/{id}/incidents</code> and
+        <code class="mono">POST /api/v1/agents/{id}/reliability-reports</code>.
       </p>
-      <form id="incident-form" class="flex flex-col gap-3">
-        <input type="password" id="incident-api-key" class="input" placeholder="Reporter API key" required>
-        <div class="grid grid-cols-3 gap-3">
-          <select id="incident-category" class="input" required>
-            {% for category in incident_categories %}
-              <option value="{{ category }}">{{ category }}</option>
-            {% endfor %}
-          </select>
-          <select id="incident-outcome" class="input" required>
-            {% for outcome in incident_outcomes %}
-              <option value="{{ outcome }}">{{ outcome }}</option>
-            {% endfor %}
-          </select>
-          <select id="incident-visibility" class="input" required>
-            {% for visibility in incident_visibilities %}
-              <option value="{{ visibility }}">{{ visibility }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <textarea id="incident-description" class="input" rows="5" minlength="1" maxlength="2000" placeholder="Describe the incident" required></textarea>
-        <div class="flex items-center gap-2">
-          <button type="submit" class="btn btn-secondary">Submit incident</button>
-          <span id="incident-form-status" class="text-xs text-tertiary"></span>
-        </div>
-      </form>
     </div>
   </section>
 
@@ -361,45 +339,6 @@ function copyToClipboard(text, btn) {
       btn.innerHTML = original;
       btn.classList.remove('copied');
     }, 2000);
-  });
-}
-
-const incidentForm = document.getElementById('incident-form');
-if (incidentForm) {
-  incidentForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const statusEl = document.getElementById('incident-form-status');
-    const apiKey = document.getElementById('incident-api-key').value;
-    const category = document.getElementById('incident-category').value;
-    const outcome = document.getElementById('incident-outcome').value;
-    const visibility = document.getElementById('incident-visibility').value;
-    const description = document.getElementById('incident-description').value;
-
-    statusEl.textContent = 'Submitting…';
-    try {
-      const response = await fetch('/api/v1/agents/{{ agent.id }}/incidents', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-        },
-        body: JSON.stringify({
-          category,
-          description,
-          outcome,
-          visibility,
-        }),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        statusEl.textContent = payload.detail || 'Submission failed';
-        return;
-      }
-      statusEl.textContent = 'Incident submitted. Refresh to see updates.';
-      incidentForm.reset();
-    } catch (error) {
-      statusEl.textContent = 'Submission failed';
-    }
   });
 }
 
