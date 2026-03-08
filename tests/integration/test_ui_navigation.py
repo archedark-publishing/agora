@@ -33,4 +33,6 @@ async def test_homepage_agent_card_link_loads_detail_page(client) -> None:
     assert "Homepage Agent" in detail.text
     assert "Reputation" in detail.text
     assert 'href="#reputation"' in detail.text
-    assert "Submit incident report (authenticated)" in detail.text
+    assert "Incident reporting is API-only" in detail.text
+    assert "POST /api/v1/agents/{id}/incidents" in detail.text
+    assert "Submit incident report (authenticated)" not in detail.text
