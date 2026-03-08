@@ -99,7 +99,7 @@ templates = Jinja2Templates(directory="agora/templates")
 
 class ReliabilityReportCreate(BaseModel):
     interaction_date: date
-    response_received: bool | None = None
+    response_received: bool
     response_time_ms: int | None = Field(default=None, ge=0)
     response_valid: bool | None = None
     terms_honored: bool | None = None
@@ -108,8 +108,8 @@ class ReliabilityReportCreate(BaseModel):
 
 class IncidentCreate(BaseModel):
     category: str
-    description: str = Field(min_length=50, max_length=2000)
-    outcome: str | None = None
+    description: str = Field(min_length=1, max_length=2000)
+    outcome: str
     visibility: str = "public"
 
 
@@ -152,6 +152,19 @@ def _seconds_until_next_utc_day() -> int:
     return max(1, int((next_day - now_utc).total_seconds()))
 
 
+def _seconds_until_next_utc_week() -> int:
+    now_utc = datetime.now(tz=timezone.utc)
+    days_until_next_monday = 7 - now_utc.weekday()
+    if days_until_next_monday == 0:
+        days_until_next_monday = 7
+    next_week_start = datetime.combine(
+        now_utc.date() + timedelta(days=days_until_next_monday),
+        datetime.min.time(),
+        tzinfo=timezone.utc,
+    )
+    return max(1, int((next_week_start - now_utc).total_seconds()))
+
+
 def _coerce_ratio(value: Any) -> float | None:
     if value is None:
         return None
@@ -162,16 +175,12 @@ def _serialize_incident(incident: AgentIncident) -> dict[str, Any]:
     return {
         "id": str(incident.id),
         "reporter_agent_id": str(incident.reporter_agent_id),
-        "subject_agent_id": str(incident.subject_agent_id),
-        "reported_at": incident.reported_at.isoformat(),
+        "agent_id": str(incident.agent_id),
+        "created_at": incident.created_at.isoformat(),
         "category": incident.category,
         "description": incident.description,
         "outcome": incident.outcome,
-        "principal_verified": incident.principal_verified,
         "subject_response": incident.subject_response,
-        "subject_responded_at": (
-            incident.subject_responded_at.isoformat() if incident.subject_responded_at else None
-        ),
         "visibility": incident.visibility,
     }
 
@@ -225,7 +234,7 @@ async def _refresh_reliability_scores_view(session: AsyncSession) -> None:
 async def _compute_reliability_metrics(
     session: AsyncSession,
     *,
-    subject_agent_id: UUID,
+    agent_id: UUID,
 ) -> dict[str, Any]:
     try:
         row = (
@@ -233,18 +242,18 @@ async def _compute_reliability_metrics(
                 sa_text(
                     """
                     SELECT
-                        total_reports,
-                        response_rate,
-                        latency_p50,
-                        latency_p95,
-                        validity_rate,
-                        terms_honor_rate,
+                        sample_size,
+                        uptime_pct,
+                        response_valid_pct,
+                        terms_honored_pct,
+                        avg_latency_ms,
+                        availability_score,
                         last_report_at
                     FROM agent_reliability_scores
-                    WHERE subject_agent_id = :subject_agent_id
+                    WHERE agent_id = :agent_id
                     """
                 ),
-                {"subject_agent_id": subject_agent_id},
+                {"agent_id": agent_id},
             )
         ).mappings().first()
     except ProgrammingError:
@@ -257,47 +266,62 @@ async def _compute_reliability_metrics(
                 await session.execute(
                     sa_text(
                         """
+                        WITH base AS (
+                            SELECT
+                                COUNT(*)::int AS sample_size,
+                                AVG(CASE WHEN response_received THEN 100.0 ELSE 0.0 END) AS uptime_pct,
+                                AVG(CASE WHEN response_valid THEN 100.0 ELSE 0.0 END) AS response_valid_pct,
+                                AVG(CASE WHEN terms_honored THEN 100.0 ELSE 0.0 END) AS terms_honored_pct,
+                                AVG(response_time_ms)::float AS avg_latency_ms,
+                                MAX(created_at) AS last_report_at
+                            FROM reliability_reports
+                            WHERE agent_id = :agent_id
+                              AND created_at > NOW() - INTERVAL '30 days'
+                        )
                         SELECT
-                            COUNT(*)::int AS total_reports,
-                            AVG(CASE WHEN response_received THEN 1.0 ELSE 0.0 END) AS response_rate,
-                            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY response_time_ms)
-                                FILTER (WHERE response_time_ms IS NOT NULL) AS latency_p50,
-                            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time_ms)
-                                FILTER (WHERE response_time_ms IS NOT NULL) AS latency_p95,
-                            AVG(CASE WHEN response_valid THEN 1.0 ELSE 0.0 END) AS validity_rate,
-                            AVG(CASE WHEN terms_honored THEN 1.0 ELSE 0.0 END) AS terms_honor_rate,
-                            MAX(reported_at) AS last_report_at
-                        FROM agent_reliability_reports
-                        WHERE subject_agent_id = :subject_agent_id
-                          AND reported_at > NOW() - INTERVAL '30 days'
+                            sample_size,
+                            uptime_pct,
+                            response_valid_pct,
+                            terms_honored_pct,
+                            avg_latency_ms,
+                            CASE
+                                WHEN sample_size = 0 THEN NULL
+                                ELSE (
+                                    COALESCE(uptime_pct, 0)
+                                    + COALESCE(response_valid_pct, 0)
+                                    + COALESCE(terms_honored_pct, 0)
+                                ) / 3.0
+                            END AS availability_score,
+                            last_report_at
+                        FROM base
                         """
                     ),
-                    {"subject_agent_id": subject_agent_id},
+                    {"agent_id": agent_id},
                 )
             ).mappings().one()
         except ProgrammingError:
             await session.rollback()
             row = {
-                "total_reports": 0,
-                "response_rate": None,
-                "latency_p50": None,
-                "latency_p95": None,
-                "validity_rate": None,
-                "terms_honor_rate": None,
+                "sample_size": 0,
+                "uptime_pct": None,
+                "response_valid_pct": None,
+                "terms_honored_pct": None,
+                "avg_latency_ms": None,
+                "availability_score": None,
                 "last_report_at": None,
             }
 
-    total_reports = int(row["total_reports"] or 0)
+    sample_size = int(row["sample_size"] or 0)
     last_report_at = row["last_report_at"]
     return {
-        "subject_agent_id": str(subject_agent_id),
+        "agent_id": str(agent_id),
         "window_days": 30,
-        "total_reports": total_reports,
-        "response_rate": _coerce_ratio(row["response_rate"]),
-        "latency_p50": float(row["latency_p50"]) if row["latency_p50"] is not None else None,
-        "latency_p95": float(row["latency_p95"]) if row["latency_p95"] is not None else None,
-        "validity_rate": _coerce_ratio(row["validity_rate"]),
-        "terms_honor_rate": _coerce_ratio(row["terms_honor_rate"]),
+        "sample_size": sample_size,
+        "uptime_pct": _coerce_ratio(row["uptime_pct"]),
+        "response_valid_pct": _coerce_ratio(row["response_valid_pct"]),
+        "terms_honored_pct": _coerce_ratio(row["terms_honored_pct"]),
+        "avg_latency_ms": float(row["avg_latency_ms"]) if row["avg_latency_ms"] is not None else None,
+        "availability_score": _coerce_ratio(row["availability_score"]),
         "last_report_at": last_report_at.isoformat() if last_report_at else None,
     }
 
@@ -318,7 +342,7 @@ async def _load_reputation_summaries(
 
     reliability_rows = await session.execute(
         select(
-            AgentReliabilityReport.subject_agent_id,
+            AgentReliabilityReport.agent_id,
             func.avg(
                 case(
                     (AgentReliabilityReport.response_received.is_(True), 1.0),
@@ -327,24 +351,24 @@ async def _load_reputation_summaries(
             ).label("response_rate"),
         )
         .where(
-            AgentReliabilityReport.subject_agent_id.in_(subject_ids),
-            AgentReliabilityReport.reported_at >= thirty_days_ago,
+            AgentReliabilityReport.agent_id.in_(subject_ids),
+            AgentReliabilityReport.created_at >= thirty_days_ago,
         )
-        .group_by(AgentReliabilityReport.subject_agent_id)
+        .group_by(AgentReliabilityReport.agent_id)
     )
     for subject_id, response_rate in reliability_rows.all():
         summary[subject_id]["reliability_response_rate"] = _coerce_ratio(response_rate)
 
     incident_rows = await session.execute(
         select(
-            AgentIncident.subject_agent_id,
+            AgentIncident.agent_id,
             func.count(AgentIncident.id).label("public_incidents"),
         )
         .where(
-            AgentIncident.subject_agent_id.in_(subject_ids),
+            AgentIncident.agent_id.in_(subject_ids),
             AgentIncident.visibility == "public",
         )
-        .group_by(AgentIncident.subject_agent_id)
+        .group_by(AgentIncident.agent_id)
     )
     for subject_id, public_incidents in incident_rows.all():
         summary[subject_id]["public_incident_count"] = int(public_incidents or 0)
@@ -355,11 +379,11 @@ async def _load_reputation_summaries(
 def _incident_visibility_filter(
     *,
     requester_agent_id: UUID | None,
-    subject_agent_id: UUID,
+    agent_id: UUID,
 ):
     if requester_agent_id is None:
         return AgentIncident.visibility == "public"
-    if requester_agent_id == subject_agent_id:
+    if requester_agent_id == agent_id:
         return AgentIncident.visibility.in_(["public", "principal_only", "private"])
     return or_(
         AgentIncident.visibility == "public",
@@ -370,24 +394,24 @@ def _incident_visibility_filter(
 async def _build_reputation_payload(
     *,
     session: AsyncSession,
-    subject_agent_id: UUID,
+    agent_id: UUID,
     requester_agent_id: UUID | None,
 ) -> dict[str, Any]:
     reliability = await _compute_reliability_metrics(
         session,
-        subject_agent_id=subject_agent_id,
+        agent_id=agent_id,
     )
 
     visibility_filter = _incident_visibility_filter(
         requester_agent_id=requester_agent_id,
-        subject_agent_id=subject_agent_id,
+        agent_id=agent_id,
     )
 
     total_incidents = int(
         (
             await session.scalar(
                 select(func.count(AgentIncident.id)).where(
-                    AgentIncident.subject_agent_id == subject_agent_id,
+                    AgentIncident.agent_id == agent_id,
                     visibility_filter,
                 )
             )
@@ -397,7 +421,7 @@ async def _build_reputation_payload(
 
     by_category_rows = await session.execute(
         select(AgentIncident.category, func.count(AgentIncident.id))
-        .where(AgentIncident.subject_agent_id == subject_agent_id, visibility_filter)
+        .where(AgentIncident.agent_id == agent_id, visibility_filter)
         .group_by(AgentIncident.category)
     )
     by_category = {category: int(count) for category, count in by_category_rows.all()}
@@ -405,7 +429,7 @@ async def _build_reputation_payload(
     by_outcome_rows = await session.execute(
         select(AgentIncident.outcome, func.count(AgentIncident.id))
         .where(
-            AgentIncident.subject_agent_id == subject_agent_id,
+            AgentIncident.agent_id == agent_id,
             visibility_filter,
             AgentIncident.outcome.is_not(None),
         )
@@ -417,7 +441,7 @@ async def _build_reputation_payload(
         (
             await session.scalar(
                 select(func.count(AgentIncident.id)).where(
-                    AgentIncident.subject_agent_id == subject_agent_id,
+                    AgentIncident.agent_id == agent_id,
                     visibility_filter,
                     AgentIncident.subject_response.is_not(None),
                 )
@@ -432,10 +456,10 @@ async def _build_reputation_payload(
             await session.scalars(
                 select(AgentIncident)
                 .where(
-                    AgentIncident.subject_agent_id == subject_agent_id,
+                    AgentIncident.agent_id == agent_id,
                     AgentIncident.visibility == "public",
                 )
-                .order_by(desc(AgentIncident.reported_at))
+                .order_by(desc(AgentIncident.created_at))
                 .limit(5)
             )
         ).all()
@@ -951,7 +975,7 @@ async def agent_detail_page(
     }
     reputation = await _build_reputation_payload(
         session=session,
-        subject_agent_id=agent_id,
+        agent_id=agent_id,
         requester_agent_id=None,
     )
 
@@ -1422,15 +1446,23 @@ async def _enforce_reputation_submission_rate_limit(
     *,
     kind: Literal["reliability", "incident"],
     reporter_agent_id: UUID,
-    subject_agent_id: UUID,
+    agent_id: UUID,
 ) -> None:
-    date_bucket = datetime.now(tz=timezone.utc).date().isoformat()
-    window_seconds = _seconds_until_next_utc_day()
-    limit = 10 if kind == "reliability" else 3
+    now_utc = datetime.now(tz=timezone.utc)
+    if kind == "reliability":
+        period_bucket = now_utc.date().isoformat()
+        limit = 10
+        window_seconds = _seconds_until_next_utc_day()
+    else:
+        iso_year, iso_week, _ = now_utc.isocalendar()
+        period_bucket = f"{iso_year}-W{iso_week:02d}"
+        limit = 5
+        window_seconds = _seconds_until_next_utc_week()
+
     await _enforce_rate_limit(
         key=(
-            f"reputation:{kind}:{date_bucket}:"
-            f"reporter:{reporter_agent_id}:subject:{subject_agent_id}"
+            f"reputation:{kind}:{period_bucket}:"
+            f"reporter:{reporter_agent_id}:agent:{agent_id}"
         ),
         limit=limit,
         window_seconds=window_seconds,
@@ -1815,12 +1847,12 @@ async def submit_reliability_report(
     await _enforce_reputation_submission_rate_limit(
         kind="reliability",
         reporter_agent_id=reporter_agent.id,
-        subject_agent_id=agent_id,
+        agent_id=agent_id,
     )
 
     report = AgentReliabilityReport(
         reporter_agent_id=reporter_agent.id,
-        subject_agent_id=agent_id,
+        agent_id=agent_id,
         interaction_date=payload.interaction_date,
         response_received=payload.response_received,
         response_time_ms=payload.response_time_ms,
@@ -1844,8 +1876,8 @@ async def submit_reliability_report(
     return {
         "id": str(report.id),
         "reporter_agent_id": str(report.reporter_agent_id),
-        "subject_agent_id": str(report.subject_agent_id),
-        "reported_at": report.reported_at.isoformat(),
+        "agent_id": str(report.agent_id),
+        "created_at": report.created_at.isoformat(),
         "interaction_date": report.interaction_date.isoformat(),
         "message": "Reliability report submitted",
     }
@@ -1860,7 +1892,7 @@ async def get_agent_reliability(
     if subject_agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
-    return await _compute_reliability_metrics(session, subject_agent_id=agent_id)
+    return await _compute_reliability_metrics(session, agent_id=agent_id)
 
 
 @app.post(
@@ -1887,12 +1919,12 @@ async def submit_incident(
     await _enforce_reputation_submission_rate_limit(
         kind="incident",
         reporter_agent_id=reporter_agent.id,
-        subject_agent_id=agent_id,
+        agent_id=agent_id,
     )
 
     incident = AgentIncident(
         reporter_agent_id=reporter_agent.id,
-        subject_agent_id=agent_id,
+        agent_id=agent_id,
         category=payload.category,
         description=payload.description,
         outcome=payload.outcome,
@@ -1944,10 +1976,10 @@ async def list_agent_incidents(
         )
 
     filters: list[Any] = [
-        AgentIncident.subject_agent_id == agent_id,
+        AgentIncident.agent_id == agent_id,
         _incident_visibility_filter(
             requester_agent_id=requester_agent_id,
-            subject_agent_id=agent_id,
+            agent_id=agent_id,
         ),
     ]
     if category:
@@ -1956,12 +1988,12 @@ async def list_agent_incidents(
         filters.append(AgentIncident.outcome == outcome)
     if date_from:
         filters.append(
-            AgentIncident.reported_at
+            AgentIncident.created_at
             >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
         )
     if date_to:
         filters.append(
-            AgentIncident.reported_at
+            AgentIncident.created_at
             < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
         )
 
@@ -1971,7 +2003,7 @@ async def list_agent_incidents(
             await session.scalars(
                 select(AgentIncident)
                 .where(*filters)
-                .order_by(desc(AgentIncident.reported_at))
+                .order_by(desc(AgentIncident.created_at))
                 .limit(limit)
                 .offset(offset)
             )
@@ -2006,7 +2038,7 @@ async def respond_to_incident(
         select(AgentIncident)
         .where(
             AgentIncident.id == incident_id,
-            AgentIncident.subject_agent_id == agent_id,
+            AgentIncident.agent_id == agent_id,
         )
         .limit(1)
     )
@@ -2014,13 +2046,11 @@ async def respond_to_incident(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
 
     incident.subject_response = payload.response_text
-    incident.subject_responded_at = datetime.now(tz=timezone.utc)
     await session.commit()
     await session.refresh(incident)
     return {
         "id": str(incident.id),
-        "subject_agent_id": str(incident.subject_agent_id),
-        "subject_responded_at": incident.subject_responded_at.isoformat() if incident.subject_responded_at else None,
+        "agent_id": str(incident.agent_id),
         "message": "Incident response saved",
     }
 
@@ -2044,7 +2074,7 @@ async def get_agent_reputation(
 
     return await _build_reputation_payload(
         session=session,
-        subject_agent_id=agent_id,
+        agent_id=agent_id,
         requester_agent_id=requester_agent_id,
     )
 

@@ -78,6 +78,21 @@
     gap: 0.75rem;
     flex-wrap: wrap;
   }
+  .tab-nav {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .tab-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--ink-secondary);
+    text-decoration: none;
+    font-size: 0.8125rem;
+  }
   @media (max-width: 640px) {
     .detail-grid {
       grid-template-columns: 1fr;
@@ -129,6 +144,12 @@
     </div>
   </section>
 
+  <nav class="tab-nav" aria-label="Agent detail tabs">
+    <a class="tab-link" href="#details">Overview</a>
+    <a class="tab-link" href="#reputation">Reputation</a>
+    <a class="tab-link" href="#agent-card">Agent Card</a>
+  </nav>
+
   <!-- Health history -->
   {% if health_history %}
   <section class="flex flex-col gap-3">
@@ -148,7 +169,7 @@
   {% endif %}
 
   <!-- Details -->
-  <section class="flex flex-col gap-3">
+  <section id="details" class="flex flex-col gap-3">
     <h2>Details</h2>
     <div class="card">
       <div class="detail-grid">
@@ -176,44 +197,53 @@
   </section>
 
   <!-- Reputation -->
-  <section class="flex flex-col gap-3">
+  <section id="reputation" class="flex flex-col gap-3">
     <h2>Reputation</h2>
     <div class="card">
       <div class="detail-grid">
-        <span class="detail-label">Reliability reports (30d)</span>
-        <span class="detail-value">{{ reputation.reliability.total_reports }}</span>
+        <span class="detail-label">Reliability sample size (30d)</span>
+        <span class="detail-value">{{ reputation.reliability.sample_size }}</span>
 
-        <span class="detail-label">Response rate</span>
+        <span class="detail-label">Uptime %</span>
         <span class="detail-value">
-          {% if reputation.reliability.response_rate is not none %}
-            {{ (reputation.reliability.response_rate * 100)|round(1) }}%
+          {% if reputation.reliability.uptime_pct is not none %}
+            {{ reputation.reliability.uptime_pct|round(1) }}%
           {% else %}
             n/a
           {% endif %}
         </span>
 
-        <span class="detail-label">Latency p50 / p95</span>
+        <span class="detail-label">Response valid %</span>
         <span class="detail-value">
-          {% if reputation.reliability.latency_p50 is not none %}
-            {{ reputation.reliability.latency_p50|round(0) }}ms / {{ reputation.reliability.latency_p95|round(0) if reputation.reliability.latency_p95 is not none else 'n/a' }}
+          {% if reputation.reliability.response_valid_pct is not none %}
+            {{ reputation.reliability.response_valid_pct|round(1) }}%
           {% else %}
             n/a
           {% endif %}
         </span>
 
-        <span class="detail-label">Validity rate</span>
+        <span class="detail-label">Terms honored %</span>
         <span class="detail-value">
-          {% if reputation.reliability.validity_rate is not none %}
-            {{ (reputation.reliability.validity_rate * 100)|round(1) }}%
+          {% if reputation.reliability.terms_honored_pct is not none %}
+            {{ reputation.reliability.terms_honored_pct|round(1) }}%
           {% else %}
             n/a
           {% endif %}
         </span>
 
-        <span class="detail-label">Terms honored rate</span>
+        <span class="detail-label">Avg latency</span>
         <span class="detail-value">
-          {% if reputation.reliability.terms_honor_rate is not none %}
-            {{ (reputation.reliability.terms_honor_rate * 100)|round(1) }}%
+          {% if reputation.reliability.avg_latency_ms is not none %}
+            {{ reputation.reliability.avg_latency_ms|round(0) }}ms
+          {% else %}
+            n/a
+          {% endif %}
+        </span>
+
+        <span class="detail-label">Availability score</span>
+        <span class="detail-value">
+          {% if reputation.reliability.availability_score is not none %}
+            {{ reputation.reliability.availability_score|round(1) }}
           {% else %}
             n/a
           {% endif %}
@@ -232,7 +262,7 @@
             <div style="border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem;">
               <div class="flex items-center justify-between gap-2">
                 <strong style="font-size: 0.875rem;">{{ incident.category }}</strong>
-                <span class="text-xs text-tertiary">{{ incident.reported_at[:10] }}</span>
+                <span class="text-xs text-tertiary">{{ incident.created_at[:10] }}</span>
               </div>
               <p class="text-sm text-secondary mt-1">{{ incident.description }}</p>
               {% if incident.subject_response %}
@@ -259,8 +289,7 @@
               <option value="{{ category }}">{{ category }}</option>
             {% endfor %}
           </select>
-          <select id="incident-outcome" class="input">
-            <option value="">(no outcome yet)</option>
+          <select id="incident-outcome" class="input" required>
             {% for outcome in incident_outcomes %}
               <option value="{{ outcome }}">{{ outcome }}</option>
             {% endfor %}
@@ -271,7 +300,7 @@
             {% endfor %}
           </select>
         </div>
-        <textarea id="incident-description" class="input" rows="5" minlength="50" maxlength="2000" placeholder="Describe the incident (50-2000 chars)" required></textarea>
+        <textarea id="incident-description" class="input" rows="5" minlength="1" maxlength="2000" placeholder="Describe the incident" required></textarea>
         <div class="flex items-center gap-2">
           <button type="submit" class="btn btn-secondary">Submit incident</button>
           <span id="incident-form-status" class="text-xs text-tertiary"></span>
@@ -295,7 +324,7 @@
   {% endif %}
 
   <!-- Agent Card JSON -->
-  <section class="flex flex-col gap-3">
+  <section id="agent-card" class="flex flex-col gap-3">
     <div class="flex items-center justify-between">
       <h2>Agent Card</h2>
       <button class="copy-btn" onclick="copyToClipboard(document.getElementById('agent-card-json').textContent, this)">
@@ -357,7 +386,7 @@ if (incidentForm) {
         body: JSON.stringify({
           category,
           description,
-          outcome: outcome || null,
+          outcome,
           visibility,
         }),
       });
