@@ -32,4 +32,5 @@ async def test_homepage_agent_card_link_loads_detail_page(client) -> None:
     assert detail.status_code == 200
     assert "Homepage Agent" in detail.text
     assert "Reputation" in detail.text
+    assert 'href="#reputation"' in detail.text
     assert "Submit incident report (authenticated)" in detail.text

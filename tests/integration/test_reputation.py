@@ -45,7 +45,7 @@ async def test_reliability_report_submission_and_score(client) -> None:
             "response_time_ms": 120,
             "response_valid": True,
             "terms_honored": True,
-            "notes": "Reliable and adhered to the declared contract terms.",
+            "notes": "Reliable and adhered to declared terms.",
         },
         headers={"X-API-Key": "reporter-key"},
     )
@@ -54,11 +54,35 @@ async def test_reliability_report_submission_and_score(client) -> None:
     reliability = await client.get(f"/api/v1/agents/{subject_id}/reliability")
     assert reliability.status_code == 200
     body = reliability.json()
-    assert body["subject_agent_id"] == subject_id
-    assert body["total_reports"] == 1
-    assert body["response_rate"] == 1.0
-    assert body["validity_rate"] == 1.0
-    assert body["terms_honor_rate"] == 1.0
+    assert body["agent_id"] == subject_id
+    assert body["sample_size"] == 1
+    assert body["uptime_pct"] == 100.0
+    assert body["response_valid_pct"] == 100.0
+    assert body["terms_honored_pct"] == 100.0
+    assert body["avg_latency_ms"] == 120.0
+    assert body["availability_score"] == 100.0
+
+
+async def test_reliability_report_auth_failure(client) -> None:
+    subject_id = await _register_agent(
+        client,
+        "Subject Agent",
+        "https://example.com/reliability-auth-subject",
+        "subject-key",
+    )
+
+    response = await client.post(
+        f"/api/v1/agents/{subject_id}/reliability-reports",
+        json={
+            "interaction_date": "2026-02-23",
+            "response_received": True,
+            "response_time_ms": 50,
+            "response_valid": True,
+            "terms_honored": True,
+        },
+        headers={"X-API-Key": "not-a-real-key"},
+    )
+    assert response.status_code == 401
 
 
 async def test_incident_submission_response_and_combined_reputation(client) -> None:
@@ -78,11 +102,8 @@ async def test_incident_submission_response_and_combined_reputation(client) -> N
     incident = await client.post(
         f"/api/v1/agents/{subject_id}/incidents",
         json={
-            "category": "error_handling",
-            "description": (
-                "The subject agent returned an inconsistent schema when the upstream service timed out, "
-                "then recovered without documenting the behavior in its status response."
-            ),
+            "category": "deceptive_output",
+            "description": "The subject returned contradictory outputs for identical prompts.",
             "outcome": "resolved_poorly",
             "visibility": "public",
         },
@@ -91,13 +112,9 @@ async def test_incident_submission_response_and_combined_reputation(client) -> N
     assert incident.status_code == 201
     incident_id = incident.json()["id"]
 
-    incidents = await client.get(f"/api/v1/agents/{subject_id}/incidents")
-    assert incidents.status_code == 200
-    assert incidents.json()["total"] == 1
-
     response = await client.post(
         f"/api/v1/agents/{subject_id}/incidents/{incident_id}/response",
-        json={"response_text": "We fixed the timeout fallback and deployed stricter schema validation."},
+        json={"response_text": "We identified and fixed the deterministic branching bug."},
         headers={"X-API-Key": "subject-key"},
     )
     assert response.status_code == 200
@@ -106,8 +123,30 @@ async def test_incident_submission_response_and_combined_reputation(client) -> N
     assert reputation.status_code == 200
     payload = reputation.json()
     assert payload["incidents"]["total"] == 1
-    assert payload["incidents"]["by_category"]["error_handling"] == 1
+    assert payload["incidents"]["by_category"]["deceptive_output"] == 1
     assert payload["incidents"]["response_rate"] == 1.0
+    assert payload["reliability"]["sample_size"] == 0
+
+
+async def test_incident_submission_auth_failure(client) -> None:
+    subject_id = await _register_agent(
+        client,
+        "Subject Agent",
+        "https://example.com/incident-auth-subject",
+        "subject-key",
+    )
+
+    response = await client.post(
+        f"/api/v1/agents/{subject_id}/incidents",
+        json={
+            "category": "other",
+            "description": "Untrusted reporter should be rejected.",
+            "outcome": "unresolved",
+            "visibility": "public",
+        },
+        headers={"X-API-Key": "invalid-key"},
+    )
+    assert response.status_code == 401
 
 
 async def test_reputation_submission_rate_limits(client) -> None:
@@ -153,15 +192,12 @@ async def test_reputation_submission_rate_limits(client) -> None:
     )
     assert blocked_reliability.status_code == 429
 
-    for _ in range(3):
+    for _ in range(5):
         response = await client.post(
             f"/api/v1/agents/{subject_id}/incidents",
             json={
-                "category": "refusal",
-                "description": (
-                    "The reporter observed a refusal path that did not follow the documented contract, "
-                    "and the fallback guidance did not provide actionable remediation steps."
-                ),
+                "category": "refusal_to_comply",
+                "description": "Weekly limit test incident.",
                 "outcome": "unresolved",
                 "visibility": "public",
             },
@@ -172,11 +208,8 @@ async def test_reputation_submission_rate_limits(client) -> None:
     blocked_incident = await client.post(
         f"/api/v1/agents/{subject_id}/incidents",
         json={
-            "category": "refusal",
-            "description": (
-                "A fourth submission in the same UTC day should be rate limited by reporter-subject pair, "
-                "matching the acceptance criteria for incident report quotas."
-            ),
+            "category": "refusal_to_comply",
+            "description": "A sixth report in one week should be rate limited.",
             "outcome": "unresolved",
             "visibility": "public",
         },
@@ -202,11 +235,8 @@ async def test_incident_visibility_filters_without_and_with_auth(client) -> None
     private_incident = await client.post(
         f"/api/v1/agents/{subject_id}/incidents",
         json={
-            "category": "disclosure",
-            "description": (
-                "This private disclosure documents an internal mitigation path where the subject and reporter "
-                "coordinated on remediation before public disclosure was appropriate."
-            ),
+            "category": "data_handling_concern",
+            "description": "Private incident for reporter + subject visibility checks.",
             "outcome": "ongoing",
             "visibility": "private",
         },
@@ -217,11 +247,8 @@ async def test_incident_visibility_filters_without_and_with_auth(client) -> None
     public_incident = await client.post(
         f"/api/v1/agents/{subject_id}/incidents",
         json={
-            "category": "resolution",
-            "description": (
-                "Public incident describing the same chain with enough context for external observers to "
-                "understand behavior, remediation, and current confidence level."
-            ),
+            "category": "positive_exceptional_service",
+            "description": "Publicly visible positive incident for baseline filtering.",
             "outcome": "resolved_well",
             "visibility": "public",
         },
@@ -240,3 +267,9 @@ async def test_incident_visibility_filters_without_and_with_auth(client) -> None
     )
     assert as_reporter.status_code == 200
     assert as_reporter.json()["total"] == 2
+
+    invalid_auth = await client.get(
+        f"/api/v1/agents/{subject_id}/incidents",
+        headers={"X-API-Key": "bad-key"},
+    )
+    assert invalid_auth.status_code == 401

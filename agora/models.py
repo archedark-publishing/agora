@@ -29,18 +29,18 @@ class Base(DeclarativeBase):
 
 RELIABILITY_WINDOW_DAYS = 30
 INCIDENT_CATEGORIES = (
-    "refusal",
-    "boundary_test",
-    "error_handling",
-    "unexpected_behavior",
-    "resolution",
-    "disclosure",
+    "refusal_to_comply",
+    "deceptive_output",
+    "data_handling_concern",
+    "capability_misrepresentation",
+    "positive_exceptional_service",
+    "other",
 )
 INCIDENT_OUTCOMES = (
     "resolved_well",
     "resolved_poorly",
-    "unresolved",
     "ongoing",
+    "unresolved",
 )
 INCIDENT_VISIBILITIES = (
     "public",
@@ -143,12 +143,18 @@ class Agent(Base):
 class AgentReliabilityReport(Base):
     """Caller-submitted reliability signal for a subject agent."""
 
-    __tablename__ = "agent_reliability_reports"
+    __tablename__ = "reliability_reports"
     __table_args__ = (
-        CheckConstraint("response_time_ms IS NULL OR response_time_ms >= 0", name="ck_reliability_response_time_non_negative"),
-        CheckConstraint("notes IS NULL OR length(notes) <= 2000", name="ck_reliability_notes_max_len"),
-        Index("idx_reliability_subject_reported", "subject_agent_id", "reported_at"),
-        Index("idx_reliability_reporter_subject", "reporter_agent_id", "subject_agent_id"),
+        CheckConstraint(
+            "response_time_ms IS NULL OR response_time_ms >= 0",
+            name="ck_reliability_response_time_non_negative",
+        ),
+        CheckConstraint(
+            "notes IS NULL OR length(notes) <= 2000",
+            name="ck_reliability_notes_max_len",
+        ),
+        Index("idx_reliability_agent_created", "agent_id", "created_at"),
+        Index("idx_reliability_reporter_agent", "reporter_agent_id", "agent_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -156,54 +162,51 @@ class AgentReliabilityReport(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
+    agent_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     reporter_agent_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
-    subject_agent_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("agents.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    reported_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
     interaction_date: Mapped[date] = mapped_column(Date, nullable=False)
-    response_received: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    response_received: Mapped[bool] = mapped_column(Boolean, nullable=False)
     response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     terms_honored: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    disputed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
 
 
 class AgentIncident(Base):
     """Incident records that provide trust context beyond reliability metrics."""
 
-    __tablename__ = "agent_incidents"
+    __tablename__ = "incident_reports"
     __table_args__ = (
         CheckConstraint(
-            "category IN ('refusal', 'boundary_test', 'error_handling', 'unexpected_behavior', 'resolution', 'disclosure')",
+            (
+                "category IN ('refusal_to_comply', 'deceptive_output', 'data_handling_concern', "
+                "'capability_misrepresentation', 'positive_exceptional_service', 'other')"
+            ),
             name="ck_incident_category",
         ),
         CheckConstraint(
-            "outcome IS NULL OR outcome IN ('resolved_well', 'resolved_poorly', 'unresolved', 'ongoing')",
+            "outcome IN ('resolved_well', 'resolved_poorly', 'ongoing', 'unresolved')",
             name="ck_incident_outcome",
         ),
-        CheckConstraint("length(description) BETWEEN 50 AND 2000", name="ck_incident_description_len"),
         CheckConstraint(
             "visibility IN ('public', 'principal_only', 'private')",
             name="ck_incident_visibility",
         ),
-        CheckConstraint(
-            "subject_response IS NULL OR length(subject_response) BETWEEN 10 AND 2000",
-            name="ck_incident_subject_response_len",
-        ),
-        Index("idx_incidents_subject_reported", "subject_agent_id", "reported_at"),
-        Index("idx_incidents_reporter_subject", "reporter_agent_id", "subject_agent_id"),
+        Index("idx_incidents_agent_created", "agent_id", "created_at"),
+        Index("idx_incidents_reporter_agent", "reporter_agent_id", "agent_id"),
         Index("idx_incidents_category", "category"),
         Index("idx_incidents_outcome", "outcome"),
         Index("idx_incidents_visibility", "visibility"),
@@ -214,33 +217,27 @@ class AgentIncident(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
+    agent_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     reporter_agent_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
-    subject_agent_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("agents.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    reported_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    principal_verified: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        server_default=text("false"),
-    )
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     subject_response: Mapped[str | None] = mapped_column(Text, nullable=True)
-    subject_responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visibility: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         server_default=text("'public'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
