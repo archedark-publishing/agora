@@ -30,6 +30,17 @@ async def clean_state(monkeypatch) -> None:
         "agora.url_safety._resolve_ips",
         lambda _hostname: [ipaddress.ip_address("93.184.216.34")],
     )
+
+    async def _no_erc8004_discovery(
+        _endpoint_url: str,
+        *,
+        client: httpx.AsyncClient,
+        allow_private_network_targets: bool,
+    ) -> str | None:
+        return None
+
+    monkeypatch.setattr(main_module, "discover_erc8004_registration_econ_id", _no_erc8004_discovery)
+    monkeypatch.setattr("agora.health_checker.discover_erc8004_registration_econ_id", _no_erc8004_discovery)
     await main_module.rate_limiter.reset()
     main_module.query_tracker._last_queried.clear()
     main_module.latest_registry_snapshot = None

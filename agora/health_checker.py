@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agora.erc8004 import discover_erc8004_registration_econ_id, resolve_erc8004_verification
 from agora.models import Agent
 from agora.query_tracker import QueryTracker
 from agora.url_safety import (
@@ -89,6 +90,8 @@ async def _check_single_agent(
 
     probe_urls = build_agent_card_probe_urls(agent.url)
     previous_last_healthy = agent.last_healthy_at
+    is_healthy = False
+
     for probe_url in probe_urls:
         try:
             safe_target = assert_url_safe_for_outbound(
@@ -100,17 +103,30 @@ async def _check_single_agent(
             response.raise_for_status()
             payload = response.json()
             validate_agent_card(payload)
-            agent.health_status = "healthy"
-            agent.last_health_check = now_utc
-            agent.last_healthy_at = now_utc
-            return True
+            is_healthy = True
+            break
         except (httpx.HTTPError, ValueError, AgentCardValidationError, URLSafetyError):
             continue
 
-    agent.health_status = "unhealthy"
-    agent.last_health_check = now_utc
-    agent.last_healthy_at = previous_last_healthy
-    return False
+    if is_healthy:
+        agent.health_status = "healthy"
+        agent.last_health_check = now_utc
+        agent.last_healthy_at = now_utc
+    else:
+        agent.health_status = "unhealthy"
+        agent.last_health_check = now_utc
+        agent.last_healthy_at = previous_last_healthy
+
+    discovered_econ_id = await discover_erc8004_registration_econ_id(
+        agent.url,
+        client=client,
+        allow_private_network_targets=allow_private_network_targets,
+    )
+    verification = resolve_erc8004_verification(agent.econ_id, discovered_econ_id)
+    agent.econ_id = verification.econ_id
+    agent.erc8004_verified = verification.verified
+
+    return is_healthy
 
 
 async def run_health_check_cycle(

@@ -17,8 +17,8 @@ Explicit DB probe (`503` if DB is unavailable).
 
 - `POST /api/v1/agents`  
 Headers: `X-API-Key`  
-Body: A2A Agent Card JSON plus optional `econ_id` string (external economic identity reference).  
-Creates a new agent.
+Body: A2A Agent Card JSON plus optional `econ_id` string (for ERC-8004 use `{agentRegistry}:{agentId}`, e.g. `eip155:1:0x742...:22`).  
+Creates a new agent. During registration Agora attempts to fetch `https://{endpoint-domain}/.well-known/agent-registration.json`; if valid, it auto-populates/verifies `econ_id` and sets `erc8004_verified`.
 
 - `GET /api/v1/agents`  
 Query params:
@@ -37,8 +37,10 @@ Semantics:
   - OR within each filter type
   - AND across filter types
 
+List responses include both `econ_id` and `erc8004_verified` for each agent row.
+
 - `GET /api/v1/agents/{id}`  
-Returns full stored agent card + metadata, including `econ_id` (or `null`).
+Returns full stored agent card + metadata, including `econ_id` (or `null`) and `erc8004_verified` (`true|false`).
 
 - `PUT /api/v1/agents/{id}`  
 Headers: `X-API-Key`  
