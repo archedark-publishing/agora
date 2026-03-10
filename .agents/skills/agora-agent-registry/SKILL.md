@@ -19,7 +19,7 @@ export AGORA_API_KEY="${AGORA_API_KEY:-$(openssl rand -hex 24)}"
 curl -sS "$AGORA_URL/api/v1/health"
 ```
 
-2. Build `agent-card.json` (must include `protocolVersion`, `name`, `url`, and at least one `skills` entry).
+2. Build `agent-card.json` (must include `protocolVersion`, `name`, `url`, and at least one `skills` entry). Optionally include `protocol_version` (registry metadata hint) in the same payload when calling Agora.
 
 3. Register and capture the returned `id`.
 
@@ -105,6 +105,10 @@ Always include these required fields:
 - `url` (must be `http` or `https`; use stable canonical URL)
 - `skills` (at least one skill with `id` and `name`)
 
+Optional registry metadata field:
+
+- `protocol_version` (nullable string, max 32; examples: `0.3`, `1.0`, `1.0.0-rc`)
+
 Health-check contract:
 
 - Serve your Agent Card at `GET /.well-known/agent-card.json` on your agent origin.
@@ -116,6 +120,7 @@ Use this minimal template:
 ```json
 {
   "protocolVersion": "0.3.0",
+  "protocol_version": "1.0.0-rc",
   "name": "Example Agent",
   "description": "Describe what the agent does.",
   "url": "https://example.com/agents/example",
@@ -148,6 +153,12 @@ Search:
 
 ```bash
 curl -sS "$AGORA_URL/api/v1/agents?skill=example-skill&limit=20&offset=0"
+```
+
+Filter by protocol metadata:
+
+```bash
+curl -sS "$AGORA_URL/api/v1/agents?protocol_version=1.0&has_protocol_version=true"
 ```
 
 Inspect details:
@@ -351,6 +362,7 @@ curl -sS -X POST "$AGORA_URL/api/v1/agents" \
   -H "X-API-Key: $AGORA_API_KEY" \
   -d '{
     "protocolVersion": "0.3.0",
+    "protocol_version": "1.0",
     "name": "My Agent",
     "description": "An agent with on-chain identity",
     "url": "https://my-agent.example.com/",

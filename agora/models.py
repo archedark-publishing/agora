@@ -54,10 +54,6 @@ class Agent(Base):
 
     __tablename__ = "agents"
     __table_args__ = (
-        CheckConstraint(
-            r"protocol_version ~ '^\d+\.\d+\.\d+$'",
-            name="valid_protocol_version",
-        ),
         Index("idx_agents_skills", "skills", postgresql_using="gin"),
         Index("idx_agents_capabilities", "capabilities", postgresql_using="gin"),
         Index("idx_agents_tags", "tags", postgresql_using="gin"),
@@ -65,6 +61,7 @@ class Agent(Base):
         Index("idx_agents_name", "name"),
         Index("idx_agents_last_healthy_at", "last_healthy_at"),
         Index("idx_agents_econ_id", "econ_id"),
+        Index("idx_agents_protocol_version", "protocol_version"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -78,11 +75,7 @@ class Agent(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    protocol_version: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        server_default=text("'0.3.0'"),
-    )
+    protocol_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Full card + extracted search fields
     agent_card: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

@@ -151,6 +151,13 @@ class RegisterAgentRequest(BaseModel):
             "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
     )
+    protocol_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional registry-level protocol version hint (for example \"0.3\", \"1.0\", "
+            "or \"1.0.0-rc\")."
+        ),
+    )
 
 
 def _track_agent_query(agent_id: UUID) -> None:
@@ -882,7 +889,7 @@ async def agent_detail_page(
         "health_status": detail.get("health_status") or "unknown",
         "is_verified": False,
         "tenure_days": tenure_days,
-        "protocol_version": safe_agent_card.get("protocolVersion"),
+        "protocol_version": detail.get("protocol_version") or safe_agent_card.get("protocolVersion"),
         "created_at": registered_at,
         "last_healthy_at": last_healthy_at,
         "version": safe_agent_card.get("version"),
@@ -1274,6 +1281,33 @@ def _invalid_agent_card_length_detail() -> dict[str, Any]:
     }
 
 
+def _normalize_optional_string_field(
+    *,
+    field_name: str,
+    value: Any,
+    max_length: int,
+) -> str | None:
+    if value is None:
+        return None
+
+    normalized = str(value).strip() or None
+    if normalized is not None and len(normalized) > max_length:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": field_name,
+                        "message": f"String should have at most {max_length} characters",
+                        "type": "value_error.any_str.max_length",
+                    }
+                ],
+            },
+        )
+    return normalized
+
+
 def _resolve_agent_card_well_known_url(agent_card_url: str) -> str:
     if agent_card_url.endswith("/.well-known/agent.json"):
         return agent_card_url
@@ -1597,9 +1631,16 @@ async def register_agent(
             },
         ) from exc
     agent_card_url = registration_request.agent_card_url
-    econ_id = registration_request.econ_id
-    if econ_id is not None:
-        econ_id = econ_id.strip() or None
+    econ_id = _normalize_optional_string_field(
+        field_name="econ_id",
+        value=registration_request.econ_id,
+        max_length=255,
+    )
+    protocol_version = _normalize_optional_string_field(
+        field_name="protocol_version",
+        value=registration_request.protocol_version,
+        max_length=32,
+    )
 
     if agent_card_url:
         fetched_agent_card = await _fetch_agent_card_from_url(agent_card_url)
@@ -1612,6 +1653,7 @@ async def register_agent(
 
     sanitized_payload.pop("agent_card_url", None)
     sanitized_payload.pop("econ_id", None)
+    sanitized_payload.pop("protocol_version", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -1688,7 +1730,7 @@ async def register_agent(
         description=validated.card.description,
         url=normalized_url,
         version=validated.card.version,
-        protocol_version=validated.card.protocol_version,
+        protocol_version=protocol_version,
         agent_card=normalized_card,
         skills=validated.skills,
         capabilities=validated.capabilities,
@@ -2053,10 +2095,26 @@ async def get_agent_detail(
         "is_stale": is_stale,
         "stale_days": stale_days,
         "agent_card_url": agent.agent_card_url,
+        "protocol_version": agent.protocol_version,
         "econ_id": agent.econ_id,
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
     }
+
+
+@app.get("/api/v1/me", tags=["agents"])
+async def get_current_agent(
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    agent = await _authenticate_agent_from_api_key(session, api_key)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    if _upgrade_owner_key_hash_if_needed(agent, api_key):
+        await session.commit()
+
+    return await get_agent_detail(agent_id=agent.id, session=session)
 
 
 @app.post(
@@ -2339,24 +2397,18 @@ async def update_agent(
     previous_operator_verified = _operator_claim_is_verified(agent.operator)
 
     sanitized_payload = sanitize_json_strings(agent_card_payload)
-    econ_id = sanitized_payload.get("econ_id")
-    if econ_id is not None:
-        econ_id = str(econ_id).strip() or None
-        if len(econ_id) > 255:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Invalid Agent Card",
-                    "errors": [
-                        {
-                            "field": "econ_id",
-                            "message": "String should have at most 255 characters",
-                            "type": "value_error.any_str.max_length",
-                        }
-                    ],
-                },
-            )
+    econ_id = _normalize_optional_string_field(
+        field_name="econ_id",
+        value=sanitized_payload.get("econ_id"),
+        max_length=255,
+    )
+    protocol_version = _normalize_optional_string_field(
+        field_name="protocol_version",
+        value=sanitized_payload.get("protocol_version"),
+        max_length=32,
+    )
     sanitized_payload.pop("econ_id", None)
+    sanitized_payload.pop("protocol_version", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -2429,7 +2481,7 @@ async def update_agent(
     agent.name = validated.card.name
     agent.description = validated.card.description
     agent.version = validated.card.version
-    agent.protocol_version = validated.card.protocol_version
+    agent.protocol_version = protocol_version
     agent.agent_card = normalized_card
     agent.skills = validated.skills
     agent.capabilities = validated.capabilities
@@ -2485,6 +2537,14 @@ async def list_agents(
     operator_verified: bool | None = Query(
         default=None,
         description="Filter by whether operator verification is true.",
+    ),
+    has_protocol_version: bool | None = Query(
+        default=None,
+        description="Filter by whether protocol_version is set",
+    ),
+    protocol_version: str | None = Query(
+        default=None,
+        description="Exact protocol version match.",
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -2551,6 +2611,20 @@ async def list_agents(
             )
         )
 
+    if has_protocol_version is True:
+        filters.append(Agent.protocol_version.is_not(None))
+    elif has_protocol_version is False:
+        filters.append(Agent.protocol_version.is_(None))
+
+    if protocol_version is not None:
+        normalized_protocol_version = protocol_version.strip()
+        if not normalized_protocol_version:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="protocol_version cannot be empty",
+            )
+        filters.append(Agent.protocol_version == normalized_protocol_version)
+
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
     if effective_stale is True:
@@ -2607,6 +2681,7 @@ async def list_agents(
                 "reliability_response_rate": summary.get("reliability_response_rate"),
                 "public_incident_count": summary.get("public_incident_count", 0),
                 "agent_card_url": agent.agent_card_url,
+                "protocol_version": agent.protocol_version,
                 "econ_id": agent.econ_id,
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,

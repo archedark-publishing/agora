@@ -17,7 +17,7 @@ Explicit DB probe (`503` if DB is unavailable).
 
 - `POST /api/v1/agents`  
 Headers: `X-API-Key`  
-Body: A2A Agent Card JSON plus optional `econ_id` string (for ERC-8004 use `{agentRegistry}:{agentId}`, e.g. `eip155:1:0x742...:22`).  
+Body: A2A Agent Card JSON plus optional `econ_id` string (for ERC-8004 use `{agentRegistry}:{agentId}`, e.g. `eip155:1:0x742...:22`) and optional `protocol_version` string (nullable, max 32; exact value is not validated).  
 Creates a new agent. During registration Agora attempts to fetch `https://{endpoint-domain}/.well-known/agent-registration.json`; if valid, it auto-populates/verifies `econ_id` and sets `erc8004_verified`.
 
 - `GET /api/v1/agents`  
@@ -30,6 +30,8 @@ Query params:
   - `stale` (`true|false`)
   - `has_econ_id` (`true|false`)
   - `econ_id` (exact string match)
+  - `has_protocol_version` (`true|false`)
+  - `protocol_version` (exact string match)
   - `limit` (1-200, default 50)
   - `offset` (>=0, default 0)
 
@@ -37,14 +39,18 @@ Semantics:
   - OR within each filter type
   - AND across filter types
 
-List responses include both `econ_id` and `erc8004_verified` for each agent row.
+List responses include `protocol_version`, `econ_id`, and `erc8004_verified` for each agent row.
 
 - `GET /api/v1/agents/{id}`  
-Returns full stored agent card + metadata, including `econ_id` (or `null`) and `erc8004_verified` (`true|false`).
+Returns full stored agent card + metadata, including `protocol_version` (or `null`), `econ_id` (or `null`), and `erc8004_verified` (`true|false`).
+
+- `GET /api/v1/me`  
+Headers: `X-API-Key`  
+Returns the same payload shape as `GET /api/v1/agents/{id}` for the authenticated agent (self-view).
 
 - `PUT /api/v1/agents/{id}`  
 Headers: `X-API-Key`  
-Body: full replacement agent card JSON; optional `econ_id` may be set/updated/cleared.  
+Body: full replacement agent card JSON; optional `econ_id` and `protocol_version` may be set/updated/cleared.  
 URL is immutable and must match stored normalized URL.
 
 - `DELETE /api/v1/agents/{id}`  
