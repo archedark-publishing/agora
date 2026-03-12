@@ -42,8 +42,16 @@ async def test_search_page_accepts_stale_health_filter_from_ui(client) -> None:
 
 
 async def test_search_page_accepts_q_filter(client) -> None:
-    response = await client.get("/search", params={"q": "test"})
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload("Ada Match Agent", "https://example.com/ada-match-agent"),
+        headers={"X-API-Key": "search-page-q-key"},
+    )
+    assert register.status_code == 201
+
+    response = await client.get("/search", params={"q": "Ada"})
     assert response.status_code == 200
+    assert "Ada Match Agent" in response.text
 
 
 async def test_agents_api_accepts_all_and_stale_health_values(client) -> None:
