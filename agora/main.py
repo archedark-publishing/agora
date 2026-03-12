@@ -794,6 +794,8 @@ async def search_page(
     elif stale == "false":
         stale_bool = False
 
+    # Keep this internal call in sync with list_agents() params.
+    # Query defaults are only applied through FastAPI request handling, not direct Python calls.
     results = await list_agents(
         request=request,
         session=session,
