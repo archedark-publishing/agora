@@ -32,6 +32,35 @@ def test_validate_agent_card_extracts_fields() -> None:
     assert validated.input_modes == ["application/json", "text/plain"]
 
 
+def test_validate_agent_card_accepts_operator_claim() -> None:
+    payload = _valid_payload()
+    payload["operator"] = {
+        "name": "Josh Edwards",
+        "url": "https://exe.xyz",
+        "verified": True,
+    }
+
+    validated = validate_agent_card(payload)
+    assert validated.card.operator is not None
+    assert validated.card.operator.name == "Josh Edwards"
+    assert str(validated.card.operator.url) == "https://exe.xyz/"
+
+
+def test_validate_agent_card_rejects_invalid_operator_url() -> None:
+    payload = _valid_payload()
+    payload["operator"] = {
+        "name": "Josh Edwards",
+        "url": "not-a-url",
+    }
+
+    try:
+        validate_agent_card(payload)
+    except AgentCardValidationError as exc:
+        assert any(error["field"] == "operator.url" for error in exc.errors)
+        return
+    assert False, "Expected AgentCardValidationError for invalid operator.url"
+
+
 def test_validate_agent_card_requires_skills() -> None:
     payload = _valid_payload()
     payload["skills"] = []

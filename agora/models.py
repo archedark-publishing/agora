@@ -99,6 +99,7 @@ class Agent(Base):
         server_default=text("false"),
         default=False,
     )
+    operator: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Ownership + metadata
     owner_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -141,6 +142,18 @@ class Agent(Base):
         nullable=True,
     )
     recovery_challenge_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    operator_challenge_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    operator_challenge_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    operator_challenge_created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

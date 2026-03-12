@@ -39,6 +39,8 @@ async def build_registry_snapshot(
                 "stale_days": stale_days,
                 "econ_id": agent.econ_id,
                 "erc8004_verified": agent.erc8004_verified,
+                "operator": agent.operator,
+                "operator_verified": bool(agent.operator and agent.operator.get("verified") is True),
             }
         )
 
