@@ -15,6 +15,8 @@ MAX_PROTOCOL_VERSION_LENGTH = 20
 MAX_SKILL_ID_LENGTH = 255
 MAX_SKILL_NAME_LENGTH = 255
 MAX_SKILL_DESCRIPTION_LENGTH = 2000
+MAX_OPERATOR_NAME_LENGTH = 255
+MAX_OPERATOR_URL_LENGTH = 2048
 
 
 class SkillCard(BaseModel):
@@ -29,6 +31,23 @@ class SkillCard(BaseModel):
     input_modes: list[str] = Field(default_factory=list, alias="inputModes")
     output_modes: list[str] = Field(default_factory=list, alias="outputModes")
     examples: list[str] = Field(default_factory=list)
+
+
+class OperatorCard(BaseModel):
+    """Optional operator identity metadata included in an Agent Card."""
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=MAX_OPERATOR_NAME_LENGTH)
+    url: Annotated[AnyHttpUrl, Field(max_length=MAX_OPERATOR_URL_LENGTH)]
+    verified: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url_length(cls, value: AnyHttpUrl) -> AnyHttpUrl:
+        if len(str(value)) > MAX_OPERATOR_URL_LENGTH:
+            raise ValueError(f"String should have at most {MAX_OPERATOR_URL_LENGTH} characters")
+        return value
 
 
 class AgentCard(BaseModel):
@@ -50,6 +69,7 @@ class AgentCard(BaseModel):
     default_input_modes: list[str] = Field(default_factory=list, alias="defaultInputModes")
     default_output_modes: list[str] = Field(default_factory=list, alias="defaultOutputModes")
     authentication: dict[str, Any] | None = None
+    operator: OperatorCard | None = None
 
     @field_validator("url")
     @classmethod

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = 1_048_576
     health_check_interval: int = 3600
     recovery_challenge_ttl_seconds: int = 900
+    operator_challenge_ttl_seconds: int = 86400
     outbound_http_timeout_seconds: int = 10
     registry_refresh_interval: int = 3600
     reliability_scores_refresh_interval: int = 3600

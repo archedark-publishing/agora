@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import ipaddress
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from secrets import token_urlsafe
 from textwrap import dedent
 from time import monotonic
 from typing import Any, Literal
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -113,6 +114,8 @@ SKILL_MD_FALLBACK = dedent(
     https://github.com/archedark-publishing/agora/blob/main/.agents/skills/agora-agent-registry/SKILL.md
     """
 ).strip() + "\n"
+OPERATOR_VERIFICATION_TOKEN_PREFIX = "agora_verify_"
+OPERATOR_DNS_RESOLVER_URL = "https://dns.google/resolve"
 
 
 class ReliabilityReportCreate(BaseModel):
@@ -1097,6 +1100,167 @@ def _build_verify_url(agent_url: str) -> str:
     return f"https://{host}/.well-known/agora-verify"
 
 
+def _normalize_operator_claim(
+    operator_payload: Any,
+    *,
+    verified: bool,
+) -> dict[str, Any] | None:
+    if operator_payload is None:
+        return None
+
+    payload: dict[str, Any]
+    if hasattr(operator_payload, "model_dump"):
+        payload = operator_payload.model_dump(mode="json")
+    elif isinstance(operator_payload, dict):
+        payload = dict(operator_payload)
+    else:
+        return None
+
+    name = str(payload.get("name") or "").strip()
+    url_value = str(payload.get("url") or "").strip()
+    if not name or not url_value:
+        return None
+
+    return {
+        "name": name,
+        "url": url_value,
+        "verified": bool(verified),
+    }
+
+
+def _operator_claim_identity(operator_claim: dict[str, Any] | None) -> tuple[str, str] | None:
+    if not operator_claim:
+        return None
+    name = str(operator_claim.get("name") or "").strip()
+    url_value = str(operator_claim.get("url") or "").strip()
+    if not name or not url_value:
+        return None
+    return (name, url_value)
+
+
+def _operator_claim_is_verified(operator_claim: dict[str, Any] | None) -> bool:
+    return bool(operator_claim and operator_claim.get("verified") is True)
+
+
+def _apply_operator_claim_to_agent_card(agent: Agent, operator_claim: dict[str, Any] | None) -> None:
+    card = dict(agent.agent_card)
+    if operator_claim is None:
+        card.pop("operator", None)
+    else:
+        card["operator"] = operator_claim
+    agent.agent_card = card
+
+
+def _clear_operator_challenge(agent: Agent) -> None:
+    agent.operator_challenge_hash = None
+    agent.operator_challenge_expires_at = None
+    agent.operator_challenge_created_at = None
+
+
+def _operator_well_known_url(operator_url: str) -> str:
+    parts = urlsplit(operator_url)
+    return urlunsplit((parts.scheme, parts.netloc, "/.well-known/agora-operator.json", "", ""))
+
+
+def _operator_domain(operator_url: str) -> str:
+    parts = urlsplit(operator_url)
+    host = (parts.hostname or "").strip().rstrip(".")
+    if not host:
+        raise ValueError("operator.url must include a hostname")
+    return host
+
+
+def _parse_dns_txt_record_value(raw_value: str) -> str | None:
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    quoted_chunks = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', value)
+    if quoted_chunks:
+        joined = "".join(chunk.replace('\\"', '"') for chunk in quoted_chunks)
+        normalized = joined.strip()
+        return normalized or None
+
+    normalized = value.strip('"').strip()
+    return normalized or None
+
+
+async def _fetch_operator_verification_tokens_from_dns(domain: str) -> list[str]:
+    record_name = f"_agora-verify.{domain}"
+    timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        response = await client.get(
+            OPERATOR_DNS_RESOLVER_URL,
+            params={"name": record_name, "type": "TXT"},
+        )
+        response.raise_for_status()
+
+    payload = response.json()
+    answers = payload.get("Answer") if isinstance(payload, dict) else None
+    if not isinstance(answers, list):
+        return []
+
+    tokens: list[str] = []
+    for answer in answers:
+        if not isinstance(answer, dict):
+            continue
+        token = _parse_dns_txt_record_value(str(answer.get("data") or ""))
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def _extract_tokens_from_operator_well_known_payload(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+
+    tokens: list[str] = []
+    for key in ("token", "verification_token", "challenge_token"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                tokens.append(normalized)
+
+    multi_tokens = payload.get("tokens")
+    if isinstance(multi_tokens, list):
+        for value in multi_tokens:
+            if isinstance(value, str):
+                normalized = value.strip()
+                if normalized:
+                    tokens.append(normalized)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in seen:
+            continue
+        seen.add(token)
+        deduped.append(token)
+    return deduped
+
+
+async def _fetch_operator_verification_tokens_from_well_known(operator_url: str) -> list[str]:
+    endpoint_url = _operator_well_known_url(operator_url)
+    safe_target = assert_url_safe_for_outbound(
+        endpoint_url,
+        allow_private=settings.allow_private_network_targets,
+    )
+
+    timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
+    async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.get(endpoint_url)
+            response.raise_for_status()
+
+    content_type = response.headers.get("content-type", "")
+    if "application/json" not in content_type.lower():
+        raise ValueError("/.well-known/agora-operator.json must return application/json")
+
+    payload = response.json()
+    return _extract_tokens_from_operator_well_known_payload(payload)
+
+
 def _invalid_agent_card_length_detail() -> dict[str, Any]:
     return {
         "message": "Invalid Agent Card",
@@ -1513,6 +1677,12 @@ async def register_agent(
     if econ_id is not None:
         normalized_card["econ_id"] = econ_id
 
+    normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
+    if normalized_operator is None:
+        normalized_card.pop("operator", None)
+    else:
+        normalized_card["operator"] = normalized_operator
+
     agent = Agent(
         name=validated.card.name,
         description=validated.card.description,
@@ -1528,6 +1698,7 @@ async def register_agent(
         agent_card_url=agent_card_url,
         econ_id=econ_id,
         erc8004_verified=erc8004_verified,
+        operator=normalized_operator,
         owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
@@ -1732,6 +1903,134 @@ async def complete_recovery(
     }
 
 
+@app.get("/api/v1/agents/{agent_id}/operator-challenge", tags=["agents"])
+async def get_operator_challenge(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, str]:
+    await _enforce_rate_limit(
+        key=f"api:get_operator_challenge:key:{api_key_fingerprint(api_key)}",
+        limit=20,
+    )
+
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(agent, api_key)
+
+    current_operator = _normalize_operator_claim(
+        agent.operator,
+        verified=_operator_claim_is_verified(agent.operator),
+    )
+    if current_operator is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operator claim is not configured for this agent",
+        )
+
+    challenge_token = f"{OPERATOR_VERIFICATION_TOKEN_PREFIX}{token_urlsafe(24)}"
+    now_utc = datetime.now(tz=timezone.utc)
+    expires_at = now_utc + timedelta(seconds=settings.operator_challenge_ttl_seconds)
+
+    agent.operator_challenge_hash = hash_api_key(challenge_token)
+    agent.operator_challenge_created_at = now_utc
+    agent.operator_challenge_expires_at = expires_at
+    await session.commit()
+
+    return {
+        "token": challenge_token,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+@app.post("/api/v1/agents/{agent_id}/verify-operator", tags=["agents"])
+async def verify_operator(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    await _enforce_rate_limit(
+        key=f"api:post_verify_operator:key:{api_key_fingerprint(api_key)}",
+        limit=20,
+    )
+
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(agent, api_key)
+
+    current_operator = _normalize_operator_claim(
+        agent.operator,
+        verified=_operator_claim_is_verified(agent.operator),
+    )
+    if current_operator is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operator claim is not configured for this agent",
+        )
+
+    now_utc = datetime.now(tz=timezone.utc)
+    if (
+        agent.operator_challenge_hash is None
+        or agent.operator_challenge_expires_at is None
+        or agent.operator_challenge_expires_at <= now_utc
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active operator challenge or challenge expired",
+        )
+
+    try:
+        operator_domain = _operator_domain(current_operator["url"])
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    candidate_tokens: list[str] = []
+    try:
+        candidate_tokens.extend(await _fetch_operator_verification_tokens_from_dns(operator_domain))
+    except Exception:
+        pass
+
+    try:
+        candidate_tokens.extend(
+            await _fetch_operator_verification_tokens_from_well_known(current_operator["url"])
+        )
+    except Exception:
+        pass
+
+    if not candidate_tokens:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operator verification token not found in DNS TXT or /.well-known/agora-operator.json",
+        )
+
+    if not any(verify_api_key(token, agent.operator_challenge_hash) for token in candidate_tokens):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operator verification challenge mismatch",
+        )
+
+    verified_operator = _normalize_operator_claim(current_operator, verified=True)
+    agent.operator = verified_operator
+    _apply_operator_claim_to_agent_card(agent, verified_operator)
+    _clear_operator_challenge(agent)
+    await session.commit()
+
+    return {
+        "agent_id": str(agent.id),
+        "operator": verified_operator,
+        "verified": True,
+        "message": "Operator verified successfully",
+    }
+
+
 @app.get("/api/v1/agents/{agent_id}", tags=["agents"])
 async def get_agent_detail(
     agent_id: UUID,
@@ -1756,6 +2055,7 @@ async def get_agent_detail(
         "agent_card_url": agent.agent_card_url,
         "econ_id": agent.econ_id,
         "erc8004_verified": agent.erc8004_verified,
+        "operator": agent.operator,
     }
 
 
@@ -2035,6 +2335,9 @@ async def update_agent(
     _upgrade_owner_key_hash_if_needed(agent, api_key)
 
     previous_econ_id = agent.econ_id
+    previous_operator_identity = _operator_claim_identity(agent.operator)
+    previous_operator_verified = _operator_claim_is_verified(agent.operator)
+
     sanitized_payload = sanitize_json_strings(agent_card_payload)
     econ_id = sanitized_payload.get("econ_id")
     if econ_id is not None:
@@ -2114,6 +2417,15 @@ async def update_agent(
     if econ_id is not None:
         normalized_card["econ_id"] = econ_id
 
+    normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
+    if normalized_operator is None:
+        normalized_card.pop("operator", None)
+    else:
+        incoming_operator_identity = _operator_claim_identity(normalized_operator)
+        if previous_operator_verified and incoming_operator_identity == previous_operator_identity:
+            normalized_operator["verified"] = True
+        normalized_card["operator"] = normalized_operator
+
     agent.name = validated.card.name
     agent.description = validated.card.description
     agent.version = validated.card.version
@@ -2125,6 +2437,11 @@ async def update_agent(
     agent.input_modes = validated.input_modes
     agent.output_modes = validated.output_modes
     agent.econ_id = econ_id
+    agent.operator = normalized_operator
+
+    if normalized_operator is None or _operator_claim_identity(normalized_operator) != previous_operator_identity:
+        _clear_operator_challenge(agent)
+
     if previous_econ_id != econ_id:
         agent.erc8004_verified = False
     try:
@@ -2164,6 +2481,10 @@ async def list_agents(
             "{agentRegistry}:{agentId} (for example "
             "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
+    ),
+    operator_verified: bool | None = Query(
+        default=None,
+        description="Filter by whether operator verification is true.",
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -2219,6 +2540,16 @@ async def list_agents(
                 detail="econ_id cannot be empty",
             )
         filters.append(Agent.econ_id == normalized_econ_id)
+
+    if operator_verified is True:
+        filters.append(Agent.operator["verified"].astext == "true")
+    elif operator_verified is False:
+        filters.append(
+            or_(
+                Agent.operator.is_(None),
+                Agent.operator["verified"].astext != "true",
+            )
+        )
 
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
@@ -2278,6 +2609,8 @@ async def list_agents(
                 "agent_card_url": agent.agent_card_url,
                 "econ_id": agent.econ_id,
                 "erc8004_verified": agent.erc8004_verified,
+                "operator": agent.operator,
+                "operator_verified": _operator_claim_is_verified(agent.operator),
             }
         )
 
