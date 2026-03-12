@@ -37,6 +37,7 @@ async def build_registry_snapshot(
                 "updated_at": agent.updated_at.isoformat(),
                 "is_stale": is_stale,
                 "stale_days": stale_days,
+                "protocol_version": agent.protocol_version,
                 "econ_id": agent.econ_id,
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,
