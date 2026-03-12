@@ -2073,6 +2073,61 @@ async def verify_operator(
     }
 
 
+@app.get("/api/v1/agents/search", tags=["agents"])
+async def search_agents(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    skill: list[str] | None = Query(default=None),
+    capability: list[str] | None = Query(default=None),
+    tag: list[str] | None = Query(default=None),
+    health: list[str] | None = Query(default=None),
+    q: str | None = Query(default=None),
+    stale: bool | None = Query(default=None),
+    has_econ_id: bool | None = Query(default=None, description="Filter by whether econ_id is set"),
+    econ_id: str | None = Query(
+        default=None,
+        description=(
+            "Exact economic identity match. For ERC-8004 this is "
+            "{agentRegistry}:{agentId} (for example "
+            "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
+        ),
+    ),
+    operator_verified: bool | None = Query(
+        default=None,
+        description="Filter by whether operator verification is true.",
+    ),
+    has_protocol_version: bool | None = Query(
+        default=None,
+        description="Filter by whether protocol_version is set",
+    ),
+    protocol_version: str | None = Query(
+        default=None,
+        description="Exact protocol version match.",
+    ),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Legacy alias for list endpoint to avoid UUID route collisions on /agents/{agent_id}."""
+
+    return await list_agents(
+        request=request,
+        session=session,
+        skill=skill,
+        capability=capability,
+        tag=tag,
+        health=health,
+        q=q,
+        stale=stale,
+        has_econ_id=has_econ_id,
+        econ_id=econ_id,
+        operator_verified=operator_verified,
+        has_protocol_version=has_protocol_version,
+        protocol_version=protocol_version,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @app.get("/api/v1/agents/{agent_id}", tags=["agents"])
 async def get_agent_detail(
     agent_id: UUID,
