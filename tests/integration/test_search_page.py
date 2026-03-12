@@ -54,6 +54,28 @@ async def test_search_page_accepts_q_filter(client) -> None:
     assert "Ada Match Agent" in response.text
 
 
+async def test_search_page_accepts_healthy_filter(client) -> None:
+    response = await client.get("/search", params={"health": "healthy"})
+    assert response.status_code == 200
+
+
+async def test_search_page_accepts_skill_filter(client) -> None:
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(
+            "Writing Skill Agent",
+            "https://example.com/writing-skill-agent",
+            skill_id="writing",
+        ),
+        headers={"X-API-Key": "search-page-skill-key"},
+    )
+    assert register.status_code == 201
+
+    response = await client.get("/search", params={"skill": "writing"})
+    assert response.status_code == 200
+    assert "Writing Skill Agent" in response.text
+
+
 async def test_agents_api_accepts_all_and_stale_health_values(client) -> None:
     payload = build_payload("Health Filter Agent", "https://example.com/health-filter-agent")
     register = await client.post(
