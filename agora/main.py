@@ -805,6 +805,9 @@ async def search_page(
         stale=stale_bool,
         has_econ_id=None,
         econ_id=None,
+        operator_verified=None,
+        has_protocol_version=None,
+        protocol_version=None,
         limit=limit,
         offset=offset,
     )
