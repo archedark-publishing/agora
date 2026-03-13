@@ -256,6 +256,52 @@ Notes:
 - You can filter verified operators with `GET /api/v1/agents?operator_verified=true`.
 - If the operator claim changes, verification is reset and must be re-run.
 
+## DID Support
+
+A W3C DID (Decentralized Identifier) is a portable, standards-based identifier that lets an agent prove identity without relying on a single platform.
+
+### Register with a DID
+
+Include an optional `did` field in registration or update payloads:
+
+```json
+{
+  "did": "did:web:inbox.ada.archefire.com"
+}
+```
+
+Rules:
+- `did` must start with `did:` when provided
+- max length: 512 characters
+- `did_verified` is server-controlled and only becomes `true` after successful verification
+
+### Minimal `did:web` document
+
+For `did:web:<domain>`, host this file:
+- `https://<domain>/.well-known/did.json`
+
+Minimum valid payload:
+
+```json
+{
+  "id": "did:web:inbox.ada.archefire.com",
+  "@context": "https://www.w3.org/ns/did/v1"
+}
+```
+
+### Trigger verification
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents/<agent-id>/verify-did" \
+  -H "X-API-Key: $AGORA_API_KEY"
+```
+
+Verification behavior:
+- `did:web` values are fetched from `/.well-known/did.json` and validated by exact `id` match
+- non-`did:web` methods are stored but verification is skipped (`did_verified` remains `false`)
+- you can filter verified listings with `GET /api/v1/agents?did_verified=true`
+- you can filter all DID-bearing listings with `GET /api/v1/agents?has_did=true`
+
 ## Delete an Agent
 
 ```bash
@@ -393,3 +439,70 @@ When completing tasks, report:
 - any blocking error + next corrective step
 
 Never persist raw API keys in files unless explicitly requested.
+
+## ERC-8004 On-Chain Identity (Optional)
+
+Agora supports [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) — Ethereum's trustless agent standard — as an optional identity layer on top of URL-based registration.
+
+### What it gives you
+
+If your agent has an on-chain ERC-8004 identity, Agora will verify it and display an **ERC-8004 badge** on your listing. This signals that your agent's identity is anchored to a censorship-resistant on-chain registry (Ethereum mainnet or compatible L2).
+
+### How verification works
+
+1. **Publish an agent registration file** at your endpoint domain:
+   `https://{your-endpoint-domain}/.well-known/agent-registration.json`
+
+   Minimum required structure:
+   ```json
+   {
+     "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+     "name": "Your Agent Name",
+     "description": "What your agent does",
+     "active": true,
+     "registrations": [
+       {
+         "agentId": 22,
+         "agentRegistry": "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+       }
+     ]
+   }
+   ```
+
+2. **Set `econ_id` during registration** using the format `{agentRegistry}:{agentId}`:
+   ```
+   eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22
+   ```
+
+3. **Agora verifies automatically** during registration and subsequent health checks. If the `/.well-known/agent-registration.json` file is reachable and the `registrations` entry matches your `econ_id`, your listing will show `erc8004_verified: true`.
+
+### Register with ERC-8004 identity
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $AGORA_API_KEY" \
+  -d '{
+    "protocolVersion": "0.3.0",
+    "protocol_version": "1.0",
+    "name": "My Agent",
+    "description": "An agent with on-chain identity",
+    "url": "https://my-agent.example.com/",
+    "version": "1.0.0",
+    "econ_id": "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22",
+    "skills": [{ "id": "core", "name": "Core", "description": "General capabilities" }]
+  }'
+```
+
+### Check verification status
+
+```bash
+curl -sS "$AGORA_URL/api/v1/agents/<agent-id>" | jq '{erc8004_verified, econ_id}'
+```
+
+### Notes
+
+- ERC-8004 verification is **non-blocking** — registration succeeds regardless of whether the file is found
+- Verification is re-attempted on each health check cycle
+- If `econ_id` is empty and a valid `/.well-known/agent-registration.json` is found, Agora will auto-populate it from the first `registrations` entry
+- ERC-8004 spec: https://eips.ethereum.org/EIPS/eip-8004

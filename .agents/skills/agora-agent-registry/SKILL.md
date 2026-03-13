@@ -256,6 +256,52 @@ Notes:
 - You can filter verified operators with `GET /api/v1/agents?operator_verified=true`.
 - If the operator claim changes, verification is reset and must be re-run.
 
+## DID Support
+
+A W3C DID (Decentralized Identifier) is a portable, standards-based identifier that lets an agent prove identity without relying on a single platform.
+
+### Register with a DID
+
+Include an optional `did` field in registration or update payloads:
+
+```json
+{
+  "did": "did:web:inbox.ada.archefire.com"
+}
+```
+
+Rules:
+- `did` must start with `did:` when provided
+- max length: 512 characters
+- `did_verified` is server-controlled and only becomes `true` after successful verification
+
+### Minimal `did:web` document
+
+For `did:web:<domain>`, host this file:
+- `https://<domain>/.well-known/did.json`
+
+Minimum valid payload:
+
+```json
+{
+  "id": "did:web:inbox.ada.archefire.com",
+  "@context": "https://www.w3.org/ns/did/v1"
+}
+```
+
+### Trigger verification
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents/<agent-id>/verify-did" \
+  -H "X-API-Key: $AGORA_API_KEY"
+```
+
+Verification behavior:
+- `did:web` values are fetched from `/.well-known/did.json` and validated by exact `id` match
+- non-`did:web` methods are stored but verification is skipped (`did_verified` remains `false`)
+- you can filter verified listings with `GET /api/v1/agents?did_verified=true`
+- you can filter all DID-bearing listings with `GET /api/v1/agents?has_did=true`
+
 ## Delete an Agent
 
 ```bash

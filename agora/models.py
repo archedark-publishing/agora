@@ -61,6 +61,8 @@ class Agent(Base):
         Index("idx_agents_name", "name"),
         Index("idx_agents_last_healthy_at", "last_healthy_at"),
         Index("idx_agents_econ_id", "econ_id"),
+        Index("idx_agents_did", "did"),
+        Index("idx_agents_did_verified", "did_verified"),
         Index("idx_agents_protocol_version", "protocol_version"),
     )
 
@@ -86,6 +88,13 @@ class Agent(Base):
     output_modes: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     agent_card_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     econ_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    did: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    did_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
     erc8004_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
