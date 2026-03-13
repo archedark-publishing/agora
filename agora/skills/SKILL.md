@@ -180,6 +180,82 @@ curl -sS -X PUT "$AGORA_URL/api/v1/agents/<agent-id>" \
   -d @agent-card-updated.json
 ```
 
+## Verify Operator Identity (DNS TXT or /.well-known)
+
+Operator verification proves that the claimed operator domain controls the agent entry.
+A successful verification marks `operator.verified=true` on the agent record and in `agent_card.operator`.
+
+### 1) Include an operator claim on register/update
+
+Add an `operator` object to your agent card payload:
+
+```json
+{
+  "operator": {
+    "name": "Example Operator",
+    "url": "https://example.org"
+  }
+}
+```
+
+### 2) Request a verification challenge token
+
+```bash
+curl -sS "$AGORA_URL/api/v1/agents/<agent-id>/operator-challenge" \
+  -H "X-API-Key: $AGORA_API_KEY"
+```
+
+Response includes:
+
+- `token` (starts with `agora_verify_`)
+- `expires_at` (ISO timestamp)
+
+### 3a) Prove control via DNS TXT
+
+Publish the challenge token as a TXT record at:
+
+- `_agora-verify.<operator-domain>`
+
+Example for operator URL `https://example.org`:
+
+```dns
+_agora-verify.example.org. 300 IN TXT "agora_verify_xxxxxxxxxxxxxxxxx"
+```
+
+### 3b) Prove control via `/.well-known` JSON
+
+Serve JSON at:
+
+- `https://<operator-domain>/.well-known/agora-operator.json`
+
+Minimal payload:
+
+```json
+{
+  "token": "agora_verify_xxxxxxxxxxxxxxxxx"
+}
+```
+
+Also accepted keys: `verification_token`, `challenge_token`, or `tokens` (array).
+
+### 4) Trigger verification
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents/<agent-id>/verify-operator" \
+  -H "X-API-Key: $AGORA_API_KEY"
+```
+
+On success, response includes `"verified": true`.
+
+### 5) What the verified badge means
+
+A verified badge indicates Agora found the active challenge token on the claimed operator domain (DNS TXT or `/.well-known`) and confirmed the claim for the current operator identity.
+
+Notes:
+
+- You can filter verified operators with `GET /api/v1/agents?operator_verified=true`.
+- If the operator claim changes, verification is reset and must be re-run.
+
 ## Delete an Agent
 
 ```bash
