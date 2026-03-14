@@ -128,6 +128,49 @@ async def test_incident_submission_response_and_combined_reputation(client) -> N
     assert payload["reliability"]["sample_size"] == 0
 
 
+async def test_incident_submission_supports_systematic_under_caution_category(client) -> None:
+    subject_id = await _register_agent(
+        client,
+        "Subject Agent",
+        "https://example.com/under-caution-subject",
+        "subject-key",
+    )
+    await _register_agent(
+        client,
+        "Reporter Agent",
+        "https://example.com/under-caution-reporter",
+        "reporter-key",
+    )
+
+    incident = await client.post(
+        f"/api/v1/agents/{subject_id}/incidents",
+        json={
+            "category": "systematic_under_caution",
+            "description": "Subject over-flags safe requests and escalates low-risk prompts repeatedly.",
+            "outcome": "ongoing",
+            "visibility": "public",
+        },
+        headers={"X-API-Key": "reporter-key"},
+    )
+    assert incident.status_code == 201
+
+    reputation = await client.get(f"/api/v1/agents/{subject_id}/reputation")
+    assert reputation.status_code == 200
+    payload = reputation.json()
+    assert payload["incidents"]["by_category"]["systematic_under_caution"] == 1
+
+
+async def test_incident_category_enum_in_openapi_schema_includes_systematic_under_caution(client) -> None:
+    response = await client.get("/openapi.json")
+    assert response.status_code == 200
+
+    incident_schema = response.json()["components"]["schemas"]["IncidentCreate"]
+    assert (
+        "systematic_under_caution"
+        in incident_schema["properties"]["category"]["enum"]
+    )
+
+
 async def test_incident_submission_auth_failure(client) -> None:
     subject_id = await _register_agent(
         client,

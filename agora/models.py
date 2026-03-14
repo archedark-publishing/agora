@@ -33,6 +33,7 @@ INCIDENT_CATEGORIES = (
     "deceptive_output",
     "data_handling_concern",
     "capability_misrepresentation",
+    "systematic_under_caution",
     "positive_exceptional_service",
     "other",
 )
@@ -214,7 +215,8 @@ class AgentIncident(Base):
         CheckConstraint(
             (
                 "category IN ('refusal_to_comply', 'deceptive_output', 'data_handling_concern', "
-                "'capability_misrepresentation', 'positive_exceptional_service', 'other')"
+                "'capability_misrepresentation', 'systematic_under_caution', "
+                "'positive_exceptional_service', 'other')"
             ),
             name="ck_incident_category",
         ),
