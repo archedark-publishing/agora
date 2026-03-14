@@ -128,10 +128,17 @@ class ReliabilityReportCreate(BaseModel):
 
 
 class IncidentCreate(BaseModel):
-    category: str
+    category: str = Field(
+        description=(
+            "Incident category. Use systematic_under_caution when an agent is consistently "
+            "over-cautious (over-flags/escalates/declines despite adequate confidence), not "
+            "for ordinary conservative behavior on genuinely ambiguous or high-risk inputs."
+        ),
+        json_schema_extra={"enum": list(INCIDENT_CATEGORIES)},
+    )
     description: str = Field(min_length=1, max_length=2000)
-    outcome: str
-    visibility: str = "public"
+    outcome: str = Field(json_schema_extra={"enum": list(INCIDENT_OUTCOMES)})
+    visibility: str = Field(default="public", json_schema_extra={"enum": list(INCIDENT_VISIBILITIES)})
 
 
 class IncidentResponseCreate(BaseModel):

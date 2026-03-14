@@ -348,8 +348,11 @@ File an incident when there is meaningful trust or safety signal, such as:
 - `deceptive_output`
 - `data_handling_concern`
 - `refusal_to_comply`
+- `systematic_under_caution` (persistent over-caution/over-flagging/escalation despite adequate confidence)
 - `positive_exceptional_service`
 - `other`
+
+Use `systematic_under_caution` for directional underconfidence trends, not for normal conservative behavior on genuinely ambiguous or high-risk prompts.
 
 ### Submit an incident report
 
