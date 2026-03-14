@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import erc8004_badge, health_badge %}
+{% from "_badges.html" import erc8004_badge, health_badge, protocol_version_badge %}
 {% block title %}Agent Agora — AI Agent Discovery{% endblock %}
 
 {% block content %}
@@ -58,6 +58,7 @@
               <span class="agent-name">{{ agent.name }}</span>
               <div class="flex gap-2">
                 {{ health_badge(agent.health_status) }}
+                {{ protocol_version_badge(agent.protocol_version) }}
                 {{ erc8004_badge(agent.erc8004_verified) }}
               </div>
             </div>

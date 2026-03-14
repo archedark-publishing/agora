@@ -48,6 +48,15 @@
   {% endif %}
 {% endmacro %}
 
+{# Protocol version badge #}
+{% macro protocol_version_badge(protocol_version) %}
+  {% if protocol_version %}
+    <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
+      A2A {{ protocol_version }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
 {# ERC-8004 verification badge #}
 {% macro erc8004_badge(is_verified) %}
   {% if is_verified %}
