@@ -12,7 +12,7 @@ from secrets import token_urlsafe
 from textwrap import dedent
 from time import monotonic
 from typing import Any, Literal
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -150,6 +150,11 @@ class RegisterAgentRequest(BaseModel):
             "{agentRegistry}:{agentId} (for example "
             "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
+    )
+    did: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Optional W3C decentralized identifier. Must begin with did: when provided.",
     )
     protocol_version: str | None = Field(
         default=None,
@@ -778,6 +783,7 @@ async def search_page(
     tag: str | None = Query(default=None),
     health: str | None = Query(default=None),
     stale: str | None = Query(default=None),
+    did_verified: bool | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> HTMLResponse:
@@ -806,7 +812,9 @@ async def search_page(
         q=q,
         stale=stale_bool,
         has_econ_id=None,
+        has_did=None,
         econ_id=None,
+        did_verified=did_verified,
         operator_verified=None,
         has_protocol_version=None,
         protocol_version=None,
@@ -843,6 +851,7 @@ async def search_page(
             "agents": safe_results["agents"],
             "query": q or "",
             "health_filter": health_filter_ui,
+            "did_verified_filter": did_verified is True,
             "sort": request.query_params.get("sort", "recent"),
             "has_more": has_next,
             "filters": {
@@ -852,6 +861,7 @@ async def search_page(
                 "tag": tag or "",
                 "health": health or "",
                 "stale": stale or "",
+                "did_verified": did_verified,
                 "limit": limit,
                 "offset": offset,
             },
@@ -1313,6 +1323,84 @@ def _normalize_optional_string_field(
     return normalized
 
 
+def _normalize_optional_did_field(value: Any) -> str | None:
+    did = _normalize_optional_string_field(field_name="did", value=value, max_length=512)
+    if did is None:
+        return None
+    if not did.startswith("did:"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": "did",
+                        "message": "DID must start with 'did:'",
+                        "type": "value_error.did",
+                    }
+                ],
+            },
+        )
+    return did
+
+
+def _did_web_document_url(did: str) -> str:
+    did_prefix = "did:web:"
+    if not did.startswith(did_prefix):
+        raise ValueError("DID method is not did:web")
+
+    method_specific_id = did[len(did_prefix) :]
+    if not method_specific_id:
+        raise ValueError("Invalid did:web format")
+
+    encoded_host = method_specific_id.split(":", maxsplit=1)[0]
+    host = unquote(encoded_host).strip()
+    if not host or "/" in host:
+        raise ValueError("Invalid did:web format")
+
+    return f"https://{host}/.well-known/did.json"
+
+
+async def _fetch_did_web_document(
+    did_document_url: str,
+    *,
+    pinned_hostname: str,
+    pinned_ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> dict[str, Any]:
+    timeout = httpx.Timeout(settings.outbound_http_timeout_seconds)
+    try:
+        async with pin_hostname_resolution(pinned_hostname, pinned_ip):
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                response = await client.get(did_document_url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DID document endpoint unreachable or invalid",
+        ) from exc
+
+    if response.status_code != status.HTTP_200_OK:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"DID document endpoint returned HTTP {response.status_code}",
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DID document endpoint returned invalid JSON",
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DID document payload must be a JSON object",
+        )
+
+    return payload
+
+
 def _resolve_agent_card_well_known_url(agent_card_url: str) -> str:
     if agent_card_url.endswith("/.well-known/agent.json"):
         return agent_card_url
@@ -1641,6 +1729,7 @@ async def register_agent(
         value=registration_request.econ_id,
         max_length=255,
     )
+    did = _normalize_optional_did_field(registration_request.did)
     protocol_version = _normalize_optional_string_field(
         field_name="protocol_version",
         value=registration_request.protocol_version,
@@ -1658,6 +1747,8 @@ async def register_agent(
 
     sanitized_payload.pop("agent_card_url", None)
     sanitized_payload.pop("econ_id", None)
+    sanitized_payload.pop("did", None)
+    sanitized_payload.pop("did_verified", None)
     sanitized_payload.pop("protocol_version", None)
 
     try:
@@ -1723,6 +1814,8 @@ async def register_agent(
     normalized_card["url"] = normalized_url
     if econ_id is not None:
         normalized_card["econ_id"] = econ_id
+    if did is not None:
+        normalized_card["did"] = did
 
     normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
     if normalized_operator is None:
@@ -1744,6 +1837,8 @@ async def register_agent(
         output_modes=validated.output_modes,
         agent_card_url=agent_card_url,
         econ_id=econ_id,
+        did=did,
+        did_verified=False,
         erc8004_verified=erc8004_verified,
         operator=normalized_operator,
         owner_key_hash=hash_api_key(api_key),
@@ -2078,6 +2173,80 @@ async def verify_operator(
     }
 
 
+@app.post("/api/v1/agents/{agent_id}/verify-did", tags=["agents"])
+async def verify_did(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    await _enforce_rate_limit(
+        key=f"api:post_verify_did:key:{api_key_fingerprint(api_key)}",
+        limit=20,
+    )
+
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(agent, api_key)
+
+    if agent.did is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DID is not configured for this agent",
+        )
+
+    if not agent.did.startswith("did:web:"):
+        agent.did_verified = False
+        await session.commit()
+        return {
+            "agent_id": str(agent.id),
+            "did": agent.did,
+            "did_verified": False,
+            "verified": False,
+            "message": "DID method is not did:web; verification skipped",
+        }
+
+    try:
+        did_document_url = _did_web_document_url(agent.did)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        safe_target = assert_url_safe_for_outbound(
+            did_document_url,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    did_document = await _fetch_did_web_document(
+        did_document_url,
+        pinned_hostname=safe_target.hostname,
+        pinned_ip=safe_target.pinned_ip,
+    )
+
+    if did_document.get("id") != agent.did:
+        agent.did_verified = False
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DID verification failed: did.json id does not match submitted DID",
+        )
+
+    agent.did_verified = True
+    await session.commit()
+    return {
+        "agent_id": str(agent.id),
+        "did": agent.did,
+        "did_verified": True,
+        "verified": True,
+        "message": "DID verified successfully",
+    }
+
+
 @app.get("/api/v1/agents/search", tags=["agents"])
 async def search_agents(
     request: Request,
@@ -2089,6 +2258,7 @@ async def search_agents(
     q: str | None = Query(default=None),
     stale: bool | None = Query(default=None),
     has_econ_id: bool | None = Query(default=None, description="Filter by whether econ_id is set"),
+    has_did: bool | None = Query(default=None, description="Filter by whether did is set"),
     econ_id: str | None = Query(
         default=None,
         description=(
@@ -2096,6 +2266,10 @@ async def search_agents(
             "{agentRegistry}:{agentId} (for example "
             "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
+    ),
+    did_verified: bool | None = Query(
+        default=None,
+        description="Filter by whether DID verification is true.",
     ),
     operator_verified: bool | None = Query(
         default=None,
@@ -2124,7 +2298,9 @@ async def search_agents(
         q=q,
         stale=stale,
         has_econ_id=has_econ_id,
+        has_did=has_did,
         econ_id=econ_id,
+        did_verified=did_verified,
         operator_verified=operator_verified,
         has_protocol_version=has_protocol_version,
         protocol_version=protocol_version,
@@ -2157,6 +2333,8 @@ async def get_agent_detail(
         "agent_card_url": agent.agent_card_url,
         "protocol_version": agent.protocol_version,
         "econ_id": agent.econ_id,
+        "did": agent.did,
+        "did_verified": agent.did_verified,
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
     }
@@ -2462,12 +2640,15 @@ async def update_agent(
         value=sanitized_payload.get("econ_id"),
         max_length=255,
     )
+    did = _normalize_optional_did_field(sanitized_payload.get("did"))
     protocol_version = _normalize_optional_string_field(
         field_name="protocol_version",
         value=sanitized_payload.get("protocol_version"),
         max_length=32,
     )
     sanitized_payload.pop("econ_id", None)
+    sanitized_payload.pop("did", None)
+    sanitized_payload.pop("did_verified", None)
     sanitized_payload.pop("protocol_version", None)
 
     try:
@@ -2528,6 +2709,8 @@ async def update_agent(
     normalized_card["url"] = normalized_url
     if econ_id is not None:
         normalized_card["econ_id"] = econ_id
+    if did is not None:
+        normalized_card["did"] = did
 
     normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
     if normalized_operator is None:
@@ -2549,6 +2732,8 @@ async def update_agent(
     agent.input_modes = validated.input_modes
     agent.output_modes = validated.output_modes
     agent.econ_id = econ_id
+    agent.did = did
+    agent.did_verified = False
     agent.operator = normalized_operator
 
     if normalized_operator is None or _operator_claim_identity(normalized_operator) != previous_operator_identity:
@@ -2586,6 +2771,7 @@ async def list_agents(
     q: str | None = Query(default=None),
     stale: bool | None = Query(default=None),
     has_econ_id: bool | None = Query(default=None, description="Filter by whether econ_id is set"),
+    has_did: bool | None = Query(default=None, description="Filter by whether did is set"),
     econ_id: str | None = Query(
         default=None,
         description=(
@@ -2593,6 +2779,10 @@ async def list_agents(
             "{agentRegistry}:{agentId} (for example "
             "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22)."
         ),
+    ),
+    did_verified: bool | None = Query(
+        default=None,
+        description="Filter by whether DID verification is true.",
     ),
     operator_verified: bool | None = Query(
         default=None,
@@ -2652,6 +2842,11 @@ async def list_agents(
     elif has_econ_id is False:
         filters.append(Agent.econ_id.is_(None))
 
+    if has_did is True:
+        filters.append(Agent.did.is_not(None))
+    elif has_did is False:
+        filters.append(Agent.did.is_(None))
+
     if econ_id is not None:
         normalized_econ_id = econ_id.strip()
         if not normalized_econ_id:
@@ -2660,6 +2855,11 @@ async def list_agents(
                 detail="econ_id cannot be empty",
             )
         filters.append(Agent.econ_id == normalized_econ_id)
+
+    if did_verified is True:
+        filters.append(Agent.did_verified.is_(True))
+    elif did_verified is False:
+        filters.append(Agent.did_verified.is_(False))
 
     if operator_verified is True:
         filters.append(Agent.operator["verified"].astext == "true")
@@ -2743,6 +2943,8 @@ async def list_agents(
                 "agent_card_url": agent.agent_card_url,
                 "protocol_version": agent.protocol_version,
                 "econ_id": agent.econ_id,
+                "did": agent.did,
+                "did_verified": agent.did_verified,
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,
                 "operator_verified": _operator_claim_is_verified(agent.operator),

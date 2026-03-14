@@ -59,6 +59,13 @@
     color: var(--ink-secondary);
     cursor: pointer;
   }
+  .filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--ink-secondary);
+  }
 </style>
 {% endblock %}
 
@@ -105,11 +112,23 @@
       </button>
     </div>
     
-    <select class="sort-select" onchange="setSort(this.value)">
-      <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Most recent</option>
-      <option value="health" {% if sort == 'health' %}selected{% endif %}>Healthiest first</option>
-      <option value="name" {% if sort == 'name' %}selected{% endif %}>Name A-Z</option>
-    </select>
+    <div class="flex items-center gap-3">
+      <label class="filter-toggle" for="did-verified-filter">
+        <input
+          id="did-verified-filter"
+          type="checkbox"
+          {% if did_verified_filter %}checked{% endif %}
+          onchange="setDidVerified(this.checked)"
+        >
+        DID Verified
+      </label>
+
+      <select class="sort-select" onchange="setSort(this.value)">
+        <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Most recent</option>
+        <option value="health" {% if sort == 'health' %}selected{% endif %}>Healthiest first</option>
+        <option value="name" {% if sort == 'name' %}selected{% endif %}>Name A-Z</option>
+      </select>
+    </div>
   </div>
 
   <!-- Results -->
@@ -192,6 +211,16 @@ function setFilter(type, value) {
 function setSort(value) {
   const url = new URL(window.location);
   url.searchParams.set('sort', value);
+  window.location = url;
+}
+
+function setDidVerified(enabled) {
+  const url = new URL(window.location);
+  if (enabled) {
+    url.searchParams.set('did_verified', 'true');
+  } else {
+    url.searchParams.delete('did_verified');
+  }
   window.location = url;
 }
 

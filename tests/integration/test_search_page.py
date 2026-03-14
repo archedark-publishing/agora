@@ -10,8 +10,14 @@ from agora.database import AsyncSessionLocal
 from agora.models import Agent
 
 
-def build_payload(name: str, url: str, skill_id: str = "weather") -> dict:
-    return {
+def build_payload(
+    name: str,
+    url: str,
+    skill_id: str = "weather",
+    *,
+    did: str | None = None,
+) -> dict:
+    body = {
         "protocolVersion": "0.3.0",
         "name": name,
         "description": f"{name} description",
@@ -20,6 +26,9 @@ def build_payload(name: str, url: str, skill_id: str = "weather") -> dict:
         "capabilities": {"streaming": True},
         "skills": [{"id": skill_id, "name": f"{skill_id} skill"}],
     }
+    if did is not None:
+        body["did"] = did
+    return body
 
 
 async def set_agent_health_state(
@@ -216,3 +225,58 @@ async def test_search_page_shows_erc8004_badge_for_verified_agents(client, monke
     assert response.status_code == 200
     assert "ERC Search Agent" in response.text
     assert "ERC-8004" in response.text
+
+
+async def test_search_page_supports_did_verified_filter(client, monkeypatch) -> None:
+    verified_register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(
+            "Verified DID Search Agent",
+            "https://example.com/verified-did-search-agent",
+            did="did:web:verified-search.example",
+        ),
+        headers={"X-API-Key": "did-search-key"},
+    )
+    assert verified_register.status_code == 201
+
+    unverified_register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(
+            "Unverified DID Search Agent",
+            "https://example.com/unverified-did-search-agent",
+            did="did:web:unverified-search.example",
+        ),
+        headers={"X-API-Key": "did-search-key"},
+    )
+    assert unverified_register.status_code == 201
+
+    async def _fetch_did_web_document(
+        did_document_url: str,
+        **_kwargs,
+    ) -> dict[str, str]:
+        if did_document_url == "https://verified-search.example/.well-known/did.json":
+            return {
+                "id": "did:web:verified-search.example",
+                "@context": "https://www.w3.org/ns/did/v1",
+            }
+        return {
+            "id": "did:web:unexpected",
+            "@context": "https://www.w3.org/ns/did/v1",
+        }
+
+    monkeypatch.setattr(main_module, "_fetch_did_web_document", _fetch_did_web_document)
+
+    verify = await client.post(
+        f"/api/v1/agents/{verified_register.json()['id']}/verify-did",
+        headers={"X-API-Key": "did-search-key"},
+    )
+    assert verify.status_code == 200
+
+    search = await client.get("/search")
+    assert search.status_code == 200
+    assert "DID Verified" in search.text
+
+    filtered = await client.get("/search", params={"did_verified": "true"})
+    assert filtered.status_code == 200
+    assert "Verified DID Search Agent" in filtered.text
+    assert "Unverified DID Search Agent" not in filtered.text
