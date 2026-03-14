@@ -91,6 +91,7 @@ async def _check_single_agent(
     probe_urls = build_agent_card_probe_urls(agent.url)
     previous_last_healthy = agent.last_healthy_at
     is_healthy = False
+    discovered_protocol_version: str | None = None
 
     for probe_url in probe_urls:
         try:
@@ -102,7 +103,8 @@ async def _check_single_agent(
                 response = await client.get(probe_url, follow_redirects=False)
             response.raise_for_status()
             payload = response.json()
-            validate_agent_card(payload)
+            validated_card = validate_agent_card(payload)
+            discovered_protocol_version = validated_card.card.protocol_version
             is_healthy = True
             break
         except (httpx.HTTPError, ValueError, AgentCardValidationError, URLSafetyError):
@@ -112,10 +114,12 @@ async def _check_single_agent(
         agent.health_status = "healthy"
         agent.last_health_check = now_utc
         agent.last_healthy_at = now_utc
+        agent.protocol_version = discovered_protocol_version
     else:
         agent.health_status = "unhealthy"
         agent.last_health_check = now_utc
         agent.last_healthy_at = previous_last_healthy
+        agent.protocol_version = None
 
     discovered_econ_id = await discover_erc8004_registration_econ_id(
         agent.url,

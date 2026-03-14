@@ -10,9 +10,9 @@ from agora.health_checker import _check_single_agent, build_agent_card_probe_url
 from agora.models import Agent
 
 
-def _valid_card(url: str) -> dict[str, object]:
+def _valid_card(url: str, *, protocol_version: str = "0.3.0") -> dict[str, object]:
     return {
-        "protocolVersion": "0.3.0",
+        "protocolVersion": protocol_version,
         "name": "Health Test Agent",
         "description": "Health checker unit test card.",
         "url": url,
@@ -94,7 +94,43 @@ async def test_check_single_agent_uses_fallback_when_well_known_fails(monkeypatc
     assert agent.health_status == "healthy"
     assert agent.last_health_check == now_utc
     assert agent.last_healthy_at == now_utc
+    assert agent.protocol_version == "0.3.0"
     assert agent.erc8004_verified is False
+
+
+async def test_check_single_agent_refreshes_protocol_version_from_fetched_card(monkeypatch) -> None:
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/.well-known/agent-card.json":
+            return httpx.Response(
+                200,
+                json=_valid_card("https://example.com/agents/demo", protocol_version="1.0.0"),
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    monkeypatch.setattr(
+        "agora.health_checker.assert_url_safe_for_outbound",
+        lambda _url, allow_private=False: SimpleNamespace(
+            hostname="example.com",
+            pinned_ip="93.184.216.34",
+        ),
+    )
+    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+
+    agent = _agent("https://example.com/agents/demo")
+    agent.protocol_version = "0.3.0"
+    now_utc = datetime.now(tz=timezone.utc)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        healthy = await _check_single_agent(
+            agent,
+            client,
+            now_utc,
+            allow_private_network_targets=False,
+        )
+
+    assert healthy is True
+    assert agent.protocol_version == "1.0.0"
 
 
 async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypatch) -> None:
@@ -136,6 +172,7 @@ async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypat
     assert agent.health_status == "unhealthy"
     assert agent.last_health_check == now_utc
     assert agent.last_healthy_at == previous_last_healthy
+    assert agent.protocol_version is None
     assert agent.erc8004_verified is False
 
 

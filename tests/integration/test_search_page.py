@@ -16,6 +16,7 @@ def build_payload(
     skill_id: str = "weather",
     *,
     did: str | None = None,
+    protocol_version: str | None = None,
 ) -> dict:
     body = {
         "protocolVersion": "0.3.0",
@@ -28,6 +29,8 @@ def build_payload(
     }
     if did is not None:
         body["did"] = did
+    if protocol_version is not None:
+        body["protocol_version"] = protocol_version
     return body
 
 
@@ -64,6 +67,24 @@ async def test_search_page_lists_registered_agents(client) -> None:
     assert "Reliability:" in response.text
     assert "Public incidents:" in response.text
     assert "No agents registered yet" not in response.text
+
+
+async def test_search_page_shows_protocol_version_badge_when_present(client) -> None:
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(
+            "Protocol Search Agent",
+            "https://example.com/protocol-search-agent",
+            protocol_version="1.0.0",
+        ),
+        headers={"X-API-Key": "protocol-search-key"},
+    )
+    assert register.status_code == 201
+
+    response = await client.get("/search")
+    assert response.status_code == 200
+    assert "Protocol Search Agent" in response.text
+    assert "A2A 1.0.0" in response.text
 
 
 async def test_search_page_accepts_stale_health_filter_from_ui(client) -> None:

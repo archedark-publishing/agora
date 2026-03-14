@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 
-def build_payload(name: str, url: str, skill_id: str = "weather") -> dict:
-    return {
+def build_payload(
+    name: str,
+    url: str,
+    skill_id: str = "weather",
+    *,
+    protocol_version: str | None = None,
+) -> dict:
+    payload = {
         "protocolVersion": "0.3.0",
         "name": name,
         "description": f"{name} description",
@@ -11,10 +17,18 @@ def build_payload(name: str, url: str, skill_id: str = "weather") -> dict:
         "capabilities": {"streaming": True},
         "skills": [{"id": skill_id, "name": f"{skill_id} skill"}],
     }
+    if protocol_version is not None:
+        payload["protocol_version"] = protocol_version
+    return payload
 
 
 async def test_homepage_agent_card_link_loads_detail_page(client) -> None:
-    payload = build_payload("Homepage Agent", "https://example.com/homepage-agent", "weather")
+    payload = build_payload(
+        "Homepage Agent",
+        "https://example.com/homepage-agent",
+        "weather",
+        protocol_version="1.0.0",
+    )
     register = await client.post(
         "/api/v1/agents",
         json=payload,
@@ -27,6 +41,7 @@ async def test_homepage_agent_card_link_loads_detail_page(client) -> None:
     assert home.status_code == 200
     assert f'/agent/{agent_id}' in home.text
     assert 'href="https://github.com/archedark-publishing/agora"' in home.text
+    assert "A2A 1.0.0" in home.text
 
     detail = await client.get(f"/agent/{agent_id}")
     assert detail.status_code == 200

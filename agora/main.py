@@ -763,6 +763,7 @@ async def home_page(
                 "registered_at": agent.registered_at.isoformat(),
                 "reliability_response_rate": summary.get("reliability_response_rate"),
                 "public_incident_count": summary.get("public_incident_count", 0),
+                "protocol_version": agent.protocol_version,
                 "erc8004_verified": agent.erc8004_verified,
             }
         )
