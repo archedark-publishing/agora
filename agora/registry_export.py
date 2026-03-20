@@ -42,6 +42,7 @@ async def build_registry_snapshot(
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,
                 "operator_verified": bool(agent.operator and agent.operator.get("verified") is True),
+                "availability": agent.availability,
             }
         )
 

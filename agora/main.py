@@ -14,11 +14,12 @@ from time import monotonic
 from typing import Any, Literal
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
@@ -143,6 +144,134 @@ class IncidentCreate(BaseModel):
 
 class IncidentResponseCreate(BaseModel):
     response_text: str = Field(min_length=10, max_length=2000)
+
+
+def _validate_posix_cron_field(field: str, *, minimum: int, maximum: int) -> bool:
+    if not field:
+        return False
+
+    for segment in field.split(","):
+        segment = segment.strip()
+        if not segment:
+            return False
+
+        if "/" in segment:
+            base, step_raw = segment.split("/", maxsplit=1)
+            if not step_raw.isdigit() or int(step_raw) <= 0:
+                return False
+        else:
+            base = segment
+
+        if base == "*":
+            continue
+
+        if "-" in base:
+            start_raw, end_raw = base.split("-", maxsplit=1)
+            if not start_raw.isdigit() or not end_raw.isdigit():
+                return False
+            start = int(start_raw)
+            end = int(end_raw)
+            if start > end:
+                return False
+            if start < minimum or end > maximum:
+                return False
+            continue
+
+        if not base.isdigit():
+            return False
+        value = int(base)
+        if value < minimum or value > maximum:
+            return False
+
+    return True
+
+
+def _is_valid_posix_cron_expression(expression: str) -> bool:
+    fields = expression.split()
+    if len(fields) != 5:
+        return False
+
+    ranges = [
+        (0, 59),
+        (0, 23),
+        (1, 31),
+        (1, 12),
+        (0, 6),
+    ]
+
+    return all(
+        _validate_posix_cron_field(field, minimum=minimum, maximum=maximum)
+        for field, (minimum, maximum) in zip(fields, ranges, strict=True)
+    )
+
+
+class AvailabilityPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    schedule_type: Literal["cron", "interval", "manual", "persistent"] | None = None
+    cron_expression: str | None = None
+    timezone: str | None = None
+    next_active_at: datetime | None = None
+    last_active_at: datetime | None = None
+    task_latency_max_seconds: int | None = Field(default=None, ge=0)
+
+    @field_validator("cron_expression")
+    @classmethod
+    def _validate_cron_expression(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("cron_expression cannot be empty")
+        if not _is_valid_posix_cron_expression(normalized):
+            raise ValueError("cron_expression must be a valid POSIX cron expression")
+        return normalized
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("timezone cannot be empty")
+        try:
+            ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("timezone must be a valid IANA timezone") from exc
+        return normalized
+
+    @field_validator("next_active_at", "last_active_at")
+    @classmethod
+    def _validate_timezone_aware_datetime(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Datetime must include timezone information")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_schedule_requirements(self) -> "AvailabilityPayload":
+        if self.schedule_type == "cron" and not self.cron_expression:
+            raise ValueError("cron_expression is required when schedule_type is 'cron'")
+        return self
+
+
+class AgentHeartbeatRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    last_active_at: datetime | None = None
+    next_active_at: datetime | None = None
+    task_latency_max_seconds: int | None = Field(default=None, ge=0)
+
+    @field_validator("last_active_at", "next_active_at")
+    @classmethod
+    def _validate_timezone_aware_datetime(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Datetime must include timezone information")
+        return value
 
 
 class RegisterAgentRequest(BaseModel):
@@ -1304,6 +1433,60 @@ def _invalid_agent_card_length_detail() -> dict[str, Any]:
     }
 
 
+def _validation_error_to_detail(
+    exc: ValidationError,
+    *,
+    message: str,
+    field_prefix: str | None = None,
+) -> dict[str, Any]:
+    errors: list[dict[str, str]] = []
+    for err in exc.errors():
+        loc_parts = [str(item) for item in err.get("loc", ()) if str(item) != "__root__"]
+        if field_prefix:
+            loc_parts.insert(0, field_prefix)
+        field = ".".join(loc_parts) if loc_parts else (field_prefix or "payload")
+        errors.append(
+            {
+                "field": field,
+                "message": err.get("msg", "Invalid value"),
+                "type": err.get("type", "value_error"),
+            }
+        )
+    if not errors:
+        errors.append(
+            {
+                "field": field_prefix or "payload",
+                "message": "Invalid value",
+                "type": "value_error",
+            }
+        )
+    return {
+        "message": message,
+        "errors": errors,
+    }
+
+
+def _parse_availability_payload(raw: Any) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    try:
+        parsed = AvailabilityPayload.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_validation_error_to_detail(
+                exc,
+                message="Invalid availability metadata",
+                field_prefix="availability",
+            ),
+        ) from exc
+
+    serialized = parsed.model_dump(mode="json", exclude_none=True)
+    if not serialized:
+        return None
+    return serialized
+
+
 def _normalize_optional_string_field(
     *,
     field_name: str,
@@ -1743,6 +1926,7 @@ async def register_agent(
         value=registration_request.protocol_version,
         max_length=32,
     )
+    availability = _parse_availability_payload(sanitized_payload.get("availability"))
 
     if agent_card_url:
         fetched_agent_card = await _fetch_agent_card_from_url(agent_card_url)
@@ -1758,6 +1942,7 @@ async def register_agent(
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
     sanitized_payload.pop("protocol_version", None)
+    sanitized_payload.pop("availability", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -1849,6 +2034,7 @@ async def register_agent(
         did_verified=False,
         erc8004_verified=erc8004_verified,
         operator=normalized_operator,
+        availability=availability,
         owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
@@ -2345,6 +2531,7 @@ async def get_agent_detail(
         "did_verified": agent.did_verified,
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
+        "availability": agent.availability,
     }
 
 
@@ -2361,6 +2548,67 @@ async def get_current_agent(
         await session.commit()
 
     return await get_agent_detail(agent_id=agent.id, session=session)
+
+
+@app.post("/api/v1/agents/{agent_id}/heartbeat", tags=["agents"])
+async def heartbeat_agent(
+    agent_id: UUID,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    await _enforce_rate_limit(
+        key=f"api:post_agent_heartbeat:key:{api_key_fingerprint(api_key)}",
+        limit=120,
+    )
+
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(agent, api_key)
+
+    try:
+        heartbeat = AgentHeartbeatRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_validation_error_to_detail(
+                exc,
+                message="Invalid heartbeat payload",
+                field_prefix="heartbeat",
+            ),
+        ) from exc
+
+    availability = dict(agent.availability or {})
+    availability["last_active_at"] = (
+        heartbeat.last_active_at or datetime.now(tz=timezone.utc)
+    ).isoformat()
+
+    if "next_active_at" in payload:
+        if heartbeat.next_active_at is None:
+            availability.pop("next_active_at", None)
+        else:
+            availability["next_active_at"] = heartbeat.next_active_at.isoformat()
+
+    if "task_latency_max_seconds" in payload:
+        if heartbeat.task_latency_max_seconds is None:
+            availability.pop("task_latency_max_seconds", None)
+        else:
+            availability["task_latency_max_seconds"] = heartbeat.task_latency_max_seconds
+
+    agent.availability = availability
+    await session.commit()
+    await session.refresh(agent)
+
+    return {
+        "id": str(agent.id),
+        "availability": agent.availability,
+        "updated_at": agent.updated_at.isoformat(),
+        "message": "Heartbeat recorded",
+    }
 
 
 @app.post(
@@ -2654,10 +2902,14 @@ async def update_agent(
         value=sanitized_payload.get("protocol_version"),
         max_length=32,
     )
+    availability = agent.availability
+    if "availability" in sanitized_payload:
+        availability = _parse_availability_payload(sanitized_payload.get("availability"))
     sanitized_payload.pop("econ_id", None)
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
     sanitized_payload.pop("protocol_version", None)
+    sanitized_payload.pop("availability", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -2743,6 +2995,7 @@ async def update_agent(
     agent.did = did
     agent.did_verified = False
     agent.operator = normalized_operator
+    agent.availability = availability
 
     if normalized_operator is None or _operator_claim_identity(normalized_operator) != previous_operator_identity:
         _clear_operator_challenge(agent)
@@ -2956,6 +3209,7 @@ async def list_agents(
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,
                 "operator_verified": _operator_claim_is_verified(agent.operator),
+                "availability": agent.availability,
             }
         )
 
