@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -201,6 +202,20 @@ class AgentReliabilityReport(Base):
     response_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     terms_honored: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reporter_weight: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        server_default=text("1.0"),
+        default=1.0,
+    )
+    held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    flagged_for_review: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
+    retracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -260,6 +275,27 @@ class AgentIncident(Base):
         nullable=False,
         server_default=text("'public'"),
     )
+    reporter_weight: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        server_default=text("1.0"),
+        default=1.0,
+    )
+    held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    flagged_for_review: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
+    retracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disputed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
+    disputed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
