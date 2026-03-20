@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import ipaddress
 import logging
+import math
 import re
 from datetime import date, datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -23,7 +24,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Text, case, cast, desc, func, not_, or_, select, text as sa_text, update
+from sqlalchemy import Text, and_, case, cast, desc, func, not_, or_, select, text as sa_text, update
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +70,10 @@ app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.mount("/static", StaticFiles(directory="agora/static"), name="static")
 started_at_monotonic = monotonic()
 RATE_LIMIT_WINDOW_SECONDS = 3600
+REPORT_HOLD_ACCOUNT_AGE_DAYS = 7
+REPORT_HOLD_DURATION = timedelta(hours=24)
+REPORT_RETRACTION_WINDOW = timedelta(hours=24)
+REPUTATION_ANOMALY_WINDOW = timedelta(days=7)
 rate_limit_logger = logging.getLogger("agora.rate_limit")
 rate_limiter, rate_limiter_is_shared = create_rate_limiter(
     backend=settings.rate_limit_backend,
@@ -341,6 +346,25 @@ def _coerce_ratio(value: Any) -> float | None:
     return round(float(value), 4)
 
 
+def _serialize_reliability_report(report: AgentReliabilityReport) -> dict[str, Any]:
+    return {
+        "id": str(report.id),
+        "reporter_agent_id": str(report.reporter_agent_id),
+        "agent_id": str(report.agent_id),
+        "interaction_date": report.interaction_date.isoformat(),
+        "response_received": report.response_received,
+        "response_time_ms": report.response_time_ms,
+        "response_valid": report.response_valid,
+        "terms_honored": report.terms_honored,
+        "notes": report.notes,
+        "reporter_weight": float(report.reporter_weight),
+        "held_until": report.held_until.isoformat() if report.held_until else None,
+        "flagged_for_review": bool(report.flagged_for_review),
+        "retracted_at": report.retracted_at.isoformat() if report.retracted_at else None,
+        "created_at": report.created_at.isoformat(),
+    }
+
+
 def _serialize_incident(incident: AgentIncident) -> dict[str, Any]:
     return {
         "id": str(incident.id),
@@ -352,6 +376,12 @@ def _serialize_incident(incident: AgentIncident) -> dict[str, Any]:
         "outcome": incident.outcome,
         "subject_response": incident.subject_response,
         "visibility": incident.visibility,
+        "reporter_weight": float(incident.reporter_weight),
+        "held_until": incident.held_until.isoformat() if incident.held_until else None,
+        "flagged_for_review": bool(incident.flagged_for_review),
+        "retracted_at": incident.retracted_at.isoformat() if incident.retracted_at else None,
+        "disputed": bool(incident.disputed),
+        "disputed_at": incident.disputed_at.isoformat() if incident.disputed_at else None,
     }
 
 
@@ -447,6 +477,8 @@ async def _compute_reliability_metrics(
                             FROM reliability_reports
                             WHERE agent_id = :agent_id
                               AND created_at > NOW() - INTERVAL '30 days'
+                              AND retracted_at IS NULL
+                              AND (held_until IS NULL OR held_until <= NOW())
                         )
                         SELECT
                             sample_size,
@@ -504,7 +536,8 @@ async def _load_reputation_summaries(
     if not subject_ids:
         return {}
 
-    thirty_days_ago = datetime.now(tz=timezone.utc) - timedelta(days=30)
+    now_utc = datetime.now(tz=timezone.utc)
+    thirty_days_ago = now_utc - timedelta(days=30)
     summary: dict[UUID, dict[str, Any]] = {
         subject_id: {"reliability_response_rate": None, "public_incident_count": 0}
         for subject_id in subject_ids
@@ -523,6 +556,7 @@ async def _load_reputation_summaries(
         .where(
             AgentReliabilityReport.agent_id.in_(subject_ids),
             AgentReliabilityReport.created_at >= thirty_days_ago,
+            _active_reliability_filter(now_utc),
         )
         .group_by(AgentReliabilityReport.agent_id)
     )
@@ -537,6 +571,7 @@ async def _load_reputation_summaries(
         .where(
             AgentIncident.agent_id.in_(subject_ids),
             AgentIncident.visibility == "public",
+            _active_incident_filter(now_utc),
         )
         .group_by(AgentIncident.agent_id)
     )
@@ -567,15 +602,40 @@ async def _build_reputation_payload(
     agent_id: UUID,
     requester_agent_id: UUID | None,
 ) -> dict[str, Any]:
+    now_utc = datetime.now(tz=timezone.utc)
     reliability = await _compute_reliability_metrics(
         session,
         agent_id=agent_id,
     )
 
+    weighted_reliability_score = await session.scalar(
+        select(
+            (
+                func.sum(
+                    case(
+                        (
+                            AgentReliabilityReport.response_received.is_(True),
+                            AgentReliabilityReport.reporter_weight,
+                        ),
+                        else_=0.0,
+                    )
+                )
+                / func.nullif(func.sum(AgentReliabilityReport.reporter_weight), 0.0)
+            )
+            * 100.0
+        ).where(
+            AgentReliabilityReport.agent_id == agent_id,
+            AgentReliabilityReport.created_at >= now_utc - timedelta(days=30),
+            _active_reliability_filter(now_utc),
+        )
+    )
+    reliability["weighted_reliability_score"] = _coerce_ratio(weighted_reliability_score)
+
     visibility_filter = _incident_visibility_filter(
         requester_agent_id=requester_agent_id,
         agent_id=agent_id,
     )
+    active_incident_filter = _active_incident_filter(now_utc)
 
     total_incidents = int(
         (
@@ -583,6 +643,7 @@ async def _build_reputation_payload(
                 select(func.count(AgentIncident.id)).where(
                     AgentIncident.agent_id == agent_id,
                     visibility_filter,
+                    active_incident_filter,
                 )
             )
         )
@@ -591,7 +652,11 @@ async def _build_reputation_payload(
 
     by_category_rows = await session.execute(
         select(AgentIncident.category, func.count(AgentIncident.id))
-        .where(AgentIncident.agent_id == agent_id, visibility_filter)
+        .where(
+            AgentIncident.agent_id == agent_id,
+            visibility_filter,
+            active_incident_filter,
+        )
         .group_by(AgentIncident.category)
     )
     by_category = {category: int(count) for category, count in by_category_rows.all()}
@@ -601,6 +666,7 @@ async def _build_reputation_payload(
         .where(
             AgentIncident.agent_id == agent_id,
             visibility_filter,
+            active_incident_filter,
             AgentIncident.outcome.is_not(None),
         )
         .group_by(AgentIncident.outcome)
@@ -613,6 +679,7 @@ async def _build_reputation_payload(
                 select(func.count(AgentIncident.id)).where(
                     AgentIncident.agent_id == agent_id,
                     visibility_filter,
+                    active_incident_filter,
                     AgentIncident.subject_response.is_not(None),
                 )
             )
@@ -621,6 +688,25 @@ async def _build_reputation_payload(
     )
     response_rate = round(responded_incidents / total_incidents, 4) if total_incidents else None
 
+    weighted_incident_score = await session.scalar(
+        select(
+            func.coalesce(
+                func.sum(
+                    AgentIncident.reporter_weight
+                    * case(
+                        (AgentIncident.category == "positive_exceptional_service", -1.0),
+                        else_=1.0,
+                    )
+                ),
+                0.0,
+            )
+        ).where(
+            AgentIncident.agent_id == agent_id,
+            visibility_filter,
+            active_incident_filter,
+        )
+    )
+
     recent_public_incidents = list(
         (
             await session.scalars(
@@ -628,6 +714,7 @@ async def _build_reputation_payload(
                 .where(
                     AgentIncident.agent_id == agent_id,
                     AgentIncident.visibility == "public",
+                    active_incident_filter,
                 )
                 .order_by(desc(AgentIncident.created_at))
                 .limit(5)
@@ -639,6 +726,7 @@ async def _build_reputation_payload(
         "reliability": reliability,
         "incidents": {
             "total": total_incidents,
+            "weighted_incident_score": _coerce_ratio(weighted_incident_score),
             "by_category": by_category,
             "by_outcome": by_outcome,
             "recent": [_serialize_incident(incident) for incident in recent_public_incidents],
@@ -709,9 +797,12 @@ async def _registry_refresh_loop() -> None:
 async def _reputation_refresh_loop() -> None:
     while True:
         try:
+            now_utc = datetime.now(tz=timezone.utc)
             async with AsyncSessionLocal() as session:
+                await _release_held_reports(session, now_utc=now_utc)
+                await _flag_reputation_anomalies(session, now_utc=now_utc)
                 await _refresh_reliability_scores_view(session)
-                reputation_logger.info("reliability_scores_refreshed")
+                reputation_logger.info("reputation_scores_and_flags_refreshed")
         except Exception as exc:  # pragma: no cover - defensive background safety
             reputation_logger.exception("reputation_refresh_failed error=%s", exc)
 
@@ -1881,6 +1972,210 @@ async def _enforce_reputation_submission_rate_limit(
     )
 
 
+def _chain_weight_bonus(agent: Agent) -> float:
+    if not agent.erc8004_verified or not agent.econ_id:
+        return 0.0
+    parts = agent.econ_id.split(":")
+    if len(parts) < 2 or parts[0] != "eip155":
+        return 0.2
+    return 0.4 if parts[1] == "1" else 0.2
+
+
+def _estimate_health_pass_rate_30d(agent: Agent, *, now_utc: datetime) -> float:
+    if agent.last_health_check is None:
+        return 0.0
+    if agent.health_status != "healthy":
+        return 0.0
+    if agent.last_health_check < now_utc - timedelta(days=30):
+        return 0.0
+    return 1.0
+
+
+def _compute_reporter_weight(agent: Agent, *, now_utc: datetime) -> float:
+    account_age_days = max(0.0, (now_utc - agent.registered_at).total_seconds() / 86400)
+    if account_age_days < REPORT_HOLD_ACCOUNT_AGE_DAYS:
+        return 0.3
+
+    account_age_score = 1.0 - math.exp(-(account_age_days / 90.0))
+    health_score = _estimate_health_pass_rate_30d(agent, now_utc=now_utc)
+    base = 0.45 + (0.35 * account_age_score) + (0.20 * health_score)
+    weight = base + _chain_weight_bonus(agent)
+    return round(max(0.3, min(weight, 1.4)), 4)
+
+
+def _compute_hold_until(agent: Agent, *, now_utc: datetime) -> datetime | None:
+    account_age = now_utc - agent.registered_at
+    if account_age < timedelta(days=REPORT_HOLD_ACCOUNT_AGE_DAYS):
+        return now_utc + REPORT_HOLD_DURATION
+    return None
+
+
+def _active_reliability_filter(now_utc: datetime):
+    return and_(
+        AgentReliabilityReport.retracted_at.is_(None),
+        or_(
+            AgentReliabilityReport.held_until.is_(None),
+            AgentReliabilityReport.held_until <= now_utc,
+        ),
+    )
+
+
+def _active_incident_filter(now_utc: datetime):
+    return and_(
+        AgentIncident.retracted_at.is_(None),
+        or_(
+            AgentIncident.held_until.is_(None),
+            AgentIncident.held_until <= now_utc,
+        ),
+    )
+
+
+async def _release_held_reports(session: AsyncSession, *, now_utc: datetime) -> None:
+    await session.execute(
+        update(AgentReliabilityReport)
+        .where(
+            AgentReliabilityReport.held_until.is_not(None),
+            AgentReliabilityReport.held_until <= now_utc,
+        )
+        .values(held_until=None)
+    )
+    await session.execute(
+        update(AgentIncident)
+        .where(
+            AgentIncident.held_until.is_not(None),
+            AgentIncident.held_until <= now_utc,
+        )
+        .values(held_until=None)
+    )
+
+
+async def _flag_reputation_anomalies(session: AsyncSession, *, now_utc: datetime) -> None:
+    window_start = now_utc - REPUTATION_ANOMALY_WINDOW
+
+    reliability_flood_reporters = [
+        reporter_id
+        for reporter_id, _subject_count, _report_count in (
+            await session.execute(
+                select(
+                    AgentReliabilityReport.reporter_agent_id,
+                    func.count(func.distinct(AgentReliabilityReport.agent_id)).label("subject_count"),
+                    func.count(AgentReliabilityReport.id).label("report_count"),
+                )
+                .where(
+                    AgentReliabilityReport.created_at >= window_start,
+                    AgentReliabilityReport.retracted_at.is_(None),
+                )
+                .group_by(AgentReliabilityReport.reporter_agent_id)
+                .having(
+                    func.count(func.distinct(AgentReliabilityReport.agent_id)) >= 5,
+                    func.count(AgentReliabilityReport.id) >= 50,
+                )
+            )
+        ).all()
+    ]
+    if reliability_flood_reporters:
+        await session.execute(
+            update(AgentReliabilityReport)
+            .where(
+                AgentReliabilityReport.reporter_agent_id.in_(reliability_flood_reporters),
+                AgentReliabilityReport.created_at >= window_start,
+                AgentReliabilityReport.retracted_at.is_(None),
+            )
+            .values(flagged_for_review=True)
+        )
+
+    incident_flood_reporters = [
+        reporter_id
+        for reporter_id, _subject_count, _report_count in (
+            await session.execute(
+                select(
+                    AgentIncident.reporter_agent_id,
+                    func.count(func.distinct(AgentIncident.agent_id)).label("subject_count"),
+                    func.count(AgentIncident.id).label("report_count"),
+                )
+                .where(
+                    AgentIncident.created_at >= window_start,
+                    AgentIncident.retracted_at.is_(None),
+                )
+                .group_by(AgentIncident.reporter_agent_id)
+                .having(
+                    func.count(func.distinct(AgentIncident.agent_id)) >= 5,
+                    func.count(AgentIncident.id) >= 25,
+                )
+            )
+        ).all()
+    ]
+    if incident_flood_reporters:
+        await session.execute(
+            update(AgentIncident)
+            .where(
+                AgentIncident.reporter_agent_id.in_(incident_flood_reporters),
+                AgentIncident.created_at >= window_start,
+                AgentIncident.retracted_at.is_(None),
+            )
+            .values(flagged_for_review=True)
+        )
+
+    incident_no_health_rows = (
+        await session.execute(
+            select(AgentIncident.id)
+            .join(Agent, Agent.id == AgentIncident.reporter_agent_id)
+            .where(
+                AgentIncident.created_at >= window_start,
+                AgentIncident.retracted_at.is_(None),
+                Agent.last_healthy_at.is_(None),
+            )
+        )
+    ).all()
+    if incident_no_health_rows:
+        await session.execute(
+            update(AgentIncident)
+            .where(AgentIncident.id.in_([row[0] for row in incident_no_health_rows]))
+            .values(flagged_for_review=True)
+        )
+
+    async def _flag_coordinated_reports(model: Any) -> None:
+        rows = (
+            await session.execute(
+                select(model.id, model.agent_id, model.reporter_agent_id, Agent.registered_at)
+                .join(Agent, Agent.id == model.reporter_agent_id)
+                .where(model.created_at >= window_start, model.retracted_at.is_(None))
+                .order_by(model.agent_id, Agent.registered_at)
+            )
+        ).all()
+        by_subject: dict[UUID, list[tuple[UUID, UUID, datetime]]] = {}
+        for report_id, subject_id, reporter_id, registered_at in rows:
+            by_subject.setdefault(subject_id, []).append((report_id, reporter_id, registered_at))
+
+        flagged_ids: set[UUID] = set()
+        for reports in by_subject.values():
+            if len(reports) < 3:
+                continue
+            reports_sorted = sorted(reports, key=lambda item: item[2])
+            for idx in range(len(reports_sorted) - 2):
+                start_at = reports_sorted[idx][2]
+                end_at = reports_sorted[idx + 2][2]
+                if end_at - start_at <= timedelta(hours=24):
+                    reporter_ids = {
+                        reports_sorted[idx][1],
+                        reports_sorted[idx + 1][1],
+                        reports_sorted[idx + 2][1],
+                    }
+                    for report_id, reporter_id, _registered_at in reports:
+                        if reporter_id in reporter_ids:
+                            flagged_ids.add(report_id)
+
+        if flagged_ids:
+            await session.execute(
+                update(model)
+                .where(model.id.in_(flagged_ids))
+                .values(flagged_for_review=True)
+            )
+
+    await _flag_coordinated_reports(AgentReliabilityReport)
+    await _flag_coordinated_reports(AgentIncident)
+
+
 def _upgrade_owner_key_hash_if_needed(agent: Agent, api_key: str) -> bool:
     if not should_rehash_api_key_hash(agent.owner_key_hash):
         return False
@@ -2636,6 +2931,10 @@ async def submit_reliability_report(
         agent_id=agent_id,
     )
 
+    now_utc = datetime.now(tz=timezone.utc)
+    reporter_weight = _compute_reporter_weight(reporter_agent, now_utc=now_utc)
+    held_until = _compute_hold_until(reporter_agent, now_utc=now_utc)
+
     report = AgentReliabilityReport(
         reporter_agent_id=reporter_agent.id,
         agent_id=agent_id,
@@ -2645,6 +2944,8 @@ async def submit_reliability_report(
         response_valid=payload.response_valid,
         terms_honored=payload.terms_honored,
         notes=payload.notes,
+        reporter_weight=reporter_weight,
+        held_until=held_until,
     )
     session.add(report)
     try:
@@ -2659,14 +2960,52 @@ async def submit_reliability_report(
     except DBAPIError as exc:  # pragma: no cover - best effort refresh
         reputation_logger.warning("reliability_refresh_after_submit_failed error=%s", exc)
 
-    return {
-        "id": str(report.id),
-        "reporter_agent_id": str(report.reporter_agent_id),
-        "agent_id": str(report.agent_id),
-        "created_at": report.created_at.isoformat(),
-        "interaction_date": report.interaction_date.isoformat(),
-        "message": "Reliability report submitted",
-    }
+    response = _serialize_reliability_report(report)
+    response["message"] = "Reliability report submitted"
+    return response
+
+
+@app.delete("/api/v1/agents/{agent_id}/reliability-reports/{report_id}", tags=["reputation"])
+async def retract_reliability_report(
+    agent_id: UUID,
+    report_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    reporter_agent = await _authenticate_agent_from_api_key(session, api_key)
+    if reporter_agent is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    report = await session.scalar(
+        select(AgentReliabilityReport)
+        .where(
+            AgentReliabilityReport.id == report_id,
+            AgentReliabilityReport.agent_id == agent_id,
+            AgentReliabilityReport.reporter_agent_id == reporter_agent.id,
+        )
+        .limit(1)
+    )
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reliability report not found")
+
+    if report.retracted_at is None:
+        now_utc = datetime.now(tz=timezone.utc)
+        if now_utc - report.created_at > REPORT_RETRACTION_WINDOW:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Retraction window closed (24h)",
+            )
+        report.retracted_at = now_utc
+        await session.commit()
+        await session.refresh(report)
+        try:
+            await _refresh_reliability_scores_view(session)
+        except DBAPIError as exc:  # pragma: no cover - best effort refresh
+            reputation_logger.warning("reliability_refresh_after_retract_failed error=%s", exc)
+
+    response = _serialize_reliability_report(report)
+    response["message"] = "Reliability report retracted"
+    return response
 
 
 @app.get("/api/v1/agents/{agent_id}/reliability", tags=["reputation"])
@@ -2708,6 +3047,10 @@ async def submit_incident(
         agent_id=agent_id,
     )
 
+    now_utc = datetime.now(tz=timezone.utc)
+    reporter_weight = _compute_reporter_weight(reporter_agent, now_utc=now_utc)
+    held_until = _compute_hold_until(reporter_agent, now_utc=now_utc)
+
     incident = AgentIncident(
         reporter_agent_id=reporter_agent.id,
         agent_id=agent_id,
@@ -2715,6 +3058,8 @@ async def submit_incident(
         description=payload.description,
         outcome=payload.outcome,
         visibility=payload.visibility,
+        reporter_weight=reporter_weight,
+        held_until=held_until,
     )
     session.add(incident)
     try:
@@ -2761,12 +3106,14 @@ async def list_agent_incidents(
             detail=f"Invalid outcome. Must be one of: {', '.join(INCIDENT_OUTCOMES)}",
         )
 
+    now_utc = datetime.now(tz=timezone.utc)
     filters: list[Any] = [
         AgentIncident.agent_id == agent_id,
         _incident_visibility_filter(
             requester_agent_id=requester_agent_id,
             agent_id=agent_id,
         ),
+        _active_incident_filter(now_utc),
     ]
     if category:
         filters.append(AgentIncident.category == category)
@@ -2825,6 +3172,7 @@ async def respond_to_incident(
         .where(
             AgentIncident.id == incident_id,
             AgentIncident.agent_id == agent_id,
+            AgentIncident.retracted_at.is_(None),
         )
         .limit(1)
     )
@@ -2838,6 +3186,48 @@ async def respond_to_incident(
         "id": str(incident.id),
         "agent_id": str(incident.agent_id),
         "message": "Incident response saved",
+    }
+
+
+@app.post("/api/v1/agents/{agent_id}/incidents/{incident_id}/dispute", tags=["reputation"])
+async def dispute_incident(
+    agent_id: UUID,
+    incident_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    subject_agent = await session.get(Agent, agent_id)
+    if subject_agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, subject_agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(subject_agent, api_key)
+
+    incident = await session.scalar(
+        select(AgentIncident)
+        .where(
+            AgentIncident.id == incident_id,
+            AgentIncident.agent_id == agent_id,
+            AgentIncident.retracted_at.is_(None),
+        )
+        .limit(1)
+    )
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    if not incident.disputed:
+        incident.disputed = True
+        incident.disputed_at = datetime.now(tz=timezone.utc)
+        await session.commit()
+        await session.refresh(incident)
+
+    return {
+        "id": str(incident.id),
+        "agent_id": str(incident.agent_id),
+        "disputed": incident.disputed,
+        "disputed_at": incident.disputed_at.isoformat() if incident.disputed_at else None,
+        "message": "Incident marked as disputed",
     }
 
 
@@ -3215,6 +3605,102 @@ async def list_agents(
 
     return {
         "agents": response_agents,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/v1/admin/reliability-reports", tags=["admin", "reputation"])
+async def admin_list_reliability_reports(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+    agent_id: UUID | None = Query(default=None),
+    reporter_agent_id: UUID | None = Query(default=None),
+    flagged_only: bool = Query(default=False),
+    include_retracted: bool = Query(default=True),
+    include_held: bool = Query(default=True),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    await _require_admin_token(request, admin_token, scope="admin-reliability-reports")
+
+    now_utc = datetime.now(tz=timezone.utc)
+    filters: list[Any] = []
+    if agent_id is not None:
+        filters.append(AgentReliabilityReport.agent_id == agent_id)
+    if reporter_agent_id is not None:
+        filters.append(AgentReliabilityReport.reporter_agent_id == reporter_agent_id)
+    if flagged_only:
+        filters.append(AgentReliabilityReport.flagged_for_review.is_(True))
+    if not include_retracted:
+        filters.append(AgentReliabilityReport.retracted_at.is_(None))
+    if not include_held:
+        filters.append(_active_reliability_filter(now_utc))
+
+    base = select(AgentReliabilityReport)
+    if filters:
+        base = base.where(*filters)
+
+    total = int((await session.scalar(select(func.count()).select_from(base.subquery()))) or 0)
+    reports = list(
+        (
+            await session.scalars(
+                base.order_by(desc(AgentReliabilityReport.created_at)).limit(limit).offset(offset)
+            )
+        ).all()
+    )
+
+    return {
+        "reports": [_serialize_reliability_report(report) for report in reports],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/v1/admin/incidents", tags=["admin", "reputation"])
+async def admin_list_incidents(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+    agent_id: UUID | None = Query(default=None),
+    reporter_agent_id: UUID | None = Query(default=None),
+    flagged_only: bool = Query(default=False),
+    include_retracted: bool = Query(default=True),
+    include_held: bool = Query(default=True),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    await _require_admin_token(request, admin_token, scope="admin-incidents")
+
+    now_utc = datetime.now(tz=timezone.utc)
+    filters: list[Any] = []
+    if agent_id is not None:
+        filters.append(AgentIncident.agent_id == agent_id)
+    if reporter_agent_id is not None:
+        filters.append(AgentIncident.reporter_agent_id == reporter_agent_id)
+    if flagged_only:
+        filters.append(AgentIncident.flagged_for_review.is_(True))
+    if not include_retracted:
+        filters.append(AgentIncident.retracted_at.is_(None))
+    if not include_held:
+        filters.append(_active_incident_filter(now_utc))
+
+    base = select(AgentIncident)
+    if filters:
+        base = base.where(*filters)
+
+    total = int((await session.scalar(select(func.count()).select_from(base.subquery()))) or 0)
+    incidents = list(
+        (
+            await session.scalars(base.order_by(desc(AgentIncident.created_at)).limit(limit).offset(offset))
+        ).all()
+    )
+
+    return {
+        "incidents": [_serialize_incident(incident) for incident in incidents],
         "total": total,
         "limit": limit,
         "offset": offset,
