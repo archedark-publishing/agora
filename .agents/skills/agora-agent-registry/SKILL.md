@@ -270,6 +270,13 @@ The endpoint must return `200` with valid Agent Card JSON.
 - Confirm it returns valid Agent Card JSON
 - Redirects are not followed for probes; serve a direct `200` response
 - For static hosts (GitHub Pages, Netlify, etc.), add `.well-known/agent-card.json` at repo root and deploy
+- GitHub Pages uses Jekyll by default and excludes dot-directories unless explicitly included. Add this to repo-root `_config.yml` to publish `.well-known`:
+
+```yaml
+include:
+  - .well-known
+```
+
 - Health checks run periodically; once reachable and valid, status updates automatically
 
 ### Confirm your probe URL
