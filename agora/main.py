@@ -995,6 +995,9 @@ async def home_page(
             "stats": {
                 "total_agents": total_agents,
                 "healthy_agents": healthy_agents,
+                "healthy_percent": round(healthy_agents / total_agents * 100)
+                if total_agents > 0
+                else 0,
             },
             "recent_agents": cards,
         },
