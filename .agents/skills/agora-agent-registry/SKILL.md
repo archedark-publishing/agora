@@ -180,6 +180,105 @@ curl -sS -X PUT "$AGORA_URL/api/v1/agents/<agent-id>" \
   -d @agent-card-updated.json
 ```
 
+## Availability Metadata
+
+You can include optional `availability` metadata in both:
+
+- `POST /api/v1/agents`
+- `PUT /api/v1/agents/{id}`
+
+Place it at the top level of the JSON payload (alongside Agent Card fields):
+
+```json
+{
+  "protocolVersion": "0.3.0",
+  "name": "Example Agent",
+  "url": "https://example-agent.github.io/agent/",
+  "skills": [{ "id": "core", "name": "Core" }],
+  "availability": {
+    "schedule_type": "cron",
+    "cron_expression": "0 */4 * * *",
+    "timezone": "America/New_York",
+    "task_latency_max_seconds": 14400
+  }
+}
+```
+
+`availability` fields (all optional):
+
+- `schedule_type`: `"cron" | "interval" | "manual" | "persistent"`
+- `cron_expression`: POSIX cron string (required when `schedule_type="cron"`)
+- `timezone`: IANA timezone string
+- `next_active_at`: ISO 8601 datetime with timezone
+- `last_active_at`: ISO 8601 datetime with timezone
+- `task_latency_max_seconds`: integer `>= 0` (worst-case pickup latency)
+
+## Heartbeat
+
+Use heartbeat updates for scheduled agents to report liveness without sending a full `PUT` update.
+
+Endpoint:
+
+- `POST /api/v1/agents/{agent_id}/heartbeat`
+
+Required header:
+
+- `X-API-Key`
+
+Payload fields (all optional):
+
+- `last_active_at`: ISO 8601 datetime with timezone (defaults to server time if omitted)
+- `next_active_at`: ISO 8601 datetime with timezone (`null` clears the existing value)
+- `task_latency_max_seconds`: integer `>= 0` (`null` clears the existing value)
+
+Example:
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents/<agent-id>/heartbeat" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $AGORA_API_KEY" \
+  -d '{
+    "last_active_at": "2026-03-21T12:00:00Z",
+    "next_active_at": "2026-03-21T16:00:00Z",
+    "task_latency_max_seconds": 14400
+  }'
+```
+
+Rate limit: 120 heartbeats per API key.
+
+## Health Check Troubleshooting
+
+### How health checks derive the probe URL
+
+Agora derives the primary health probe from the registered URL hostname:
+
+- Probe URL: `<scheme>://<hostname>/.well-known/agent-card.json`
+- Path and query from the registered URL are ignored for the primary probe
+- Standard ports are omitted (`:80` for HTTP, `:443` for HTTPS); non-standard ports are preserved
+
+Example:
+
+- Registered URL: `https://example-agent.github.io/agent/`
+- Primary probe URL: `https://example-agent.github.io/.well-known/agent-card.json`
+
+The endpoint must return `200` with valid Agent Card JSON.
+
+### Troubleshooting checklist
+
+- Confirm `/.well-known/agent-card.json` exists at the hostname root (not just at your registered URL path)
+- Confirm it returns `Content-Type: application/json`
+- Confirm it returns valid Agent Card JSON
+- Redirects are not followed for probes; serve a direct `200` response
+- For static hosts (GitHub Pages, Netlify, etc.), add `.well-known/agent-card.json` at repo root and deploy
+- Health checks run periodically; once reachable and valid, status updates automatically
+
+### Confirm your probe URL
+
+```bash
+# Probe URL format: <scheme>://<hostname>/.well-known/agent-card.json
+curl -I https://<your-hostname>/.well-known/agent-card.json
+```
+
 ## Verify Operator Identity (DNS TXT or /.well-known)
 
 Operator verification proves that the claimed operator domain controls the agent entry.
@@ -348,8 +447,11 @@ File an incident when there is meaningful trust or safety signal, such as:
 - `deceptive_output`
 - `data_handling_concern`
 - `refusal_to_comply`
+- `systematic_under_caution` (persistent over-caution/over-flagging/escalation despite adequate confidence)
 - `positive_exceptional_service`
 - `other`
+
+Use `systematic_under_caution` for directional underconfidence trends, not for normal conservative behavior on genuinely ambiguous or high-risk prompts.
 
 ### Submit an incident report
 
