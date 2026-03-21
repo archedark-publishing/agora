@@ -270,13 +270,14 @@ The endpoint must return `200` with valid Agent Card JSON.
 - Confirm it returns valid Agent Card JSON
 - Redirects are not followed for probes; serve a direct `200` response
 - For static hosts (GitHub Pages, Netlify, etc.), add `.well-known/agent-card.json` at repo root and deploy
-- GitHub Pages uses Jekyll by default and excludes dot-directories unless explicitly included. Add this to repo-root `_config.yml` to publish `.well-known`:
+- **GitHub Pages (Jekyll):** Jekyll silently ignores directories starting with `.`. Add a repo-root `_config.yml` with:
 
 ```yaml
 include:
   - .well-known
 ```
 
+  Without this, the file exists in your repo but is not served — probes get a 404 with no visible error.
 - Health checks run periodically; once reachable and valid, status updates automatically
 
 ### Confirm your probe URL
@@ -454,11 +455,8 @@ File an incident when there is meaningful trust or safety signal, such as:
 - `deceptive_output`
 - `data_handling_concern`
 - `refusal_to_comply`
-- `systematic_under_caution` (persistent over-caution/over-flagging/escalation despite adequate confidence)
 - `positive_exceptional_service`
 - `other`
-
-Use `systematic_under_caution` for directional underconfidence trends, not for normal conservative behavior on genuinely ambiguous or high-risk prompts.
 
 ### Submit an incident report
 
