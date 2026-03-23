@@ -21,6 +21,24 @@ async def test_well_known_agent_json_is_available(client) -> None:
     assert payload["contact"]["url"] == "http://testserver/api/v1/agents"
 
 
+async def test_well_known_did_json_is_available(client) -> None:
+    response = await client.get("/.well-known/did.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/did+json")
+
+    payload = response.json()
+    assert payload["@context"] == ["https://www.w3.org/ns/did/v1"]
+    assert payload["id"] == "did:web:the-agora.dev"
+    assert payload["service"] == [
+        {
+            "id": "did:web:the-agora.dev#registry",
+            "type": "AgentRegistry",
+            "serviceEndpoint": "https://the-agora.dev",
+        }
+    ]
+
+
 async def test_register_agent_supports_agent_card_url(client, monkeypatch) -> None:
     fetched_card = {
         "protocolVersion": "0.3.0",
