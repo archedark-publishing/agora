@@ -11,18 +11,19 @@ async def test_skill_md_endpoint_serves_packaged_skill_file(client) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
 
-    expected = Path("agora/skills/SKILL.md").read_text(encoding="utf-8")
+    expected = Path(".agents/skills/agora-agent-registry/SKILL.md").read_text(encoding="utf-8")
     if not expected.endswith("\n"):
         expected = f"{expected}\n"
 
     assert response.text == expected
 
 
-async def test_packaged_skill_file_matches_openclaw_skill_source() -> None:
-    packaged = Path("agora/skills/SKILL.md").read_text(encoding="utf-8")
-    canonical = Path(".agents/skills/agora-agent-registry/SKILL.md").read_text(encoding="utf-8")
+async def test_skill_md_endpoint_uses_openclaw_skill_source_path() -> None:
+    expected = Path(".agents/skills/agora-agent-registry/SKILL.md").resolve()
 
-    assert packaged == canonical
+    assert main_module.SKILL_MD_PATH == expected
+    assert expected.exists()
+    assert not Path("agora/skills/SKILL.md").exists()
 
 
 async def test_skill_md_endpoint_falls_back_when_skill_file_missing(client, monkeypatch) -> None:
