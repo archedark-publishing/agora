@@ -941,20 +941,41 @@ async def well_known_agent_card(request: Request) -> JSONResponse:
 
 @app.get("/.well-known/did.json", tags=["meta"], include_in_schema=False)
 async def well_known_did_document() -> JSONResponse:
-    return JSONResponse(
-        {
-            "@context": ["https://www.w3.org/ns/did/v1"],
-            "id": "did:web:the-agora.dev",
-            "service": [
-                {
-                    "id": "did:web:the-agora.dev#registry",
-                    "type": "AgentRegistry",
-                    "serviceEndpoint": "https://the-agora.dev",
-                }
-            ],
-        },
-        media_type="application/did+json",
-    )
+    did = "did:web:the-agora.dev"
+    contexts: list[str] = ["https://www.w3.org/ns/did/v1"]
+    document: dict[str, object] = {
+        "id": did,
+        "service": [
+            {
+                "id": f"{did}#registry",
+                "type": "AgentRegistry",
+                "serviceEndpoint": "https://the-agora.dev",
+            }
+        ],
+    }
+
+    settings = get_settings()
+    pub_key = settings.did_public_key_multibase
+    if pub_key:
+        contexts.append("https://w3id.org/security/suites/ed25519-2020/v1")
+        key_id = f"{did}#key-1"
+        document["verificationMethod"] = [
+            {
+                "id": key_id,
+                "type": "Ed25519VerificationKey2020",
+                "controller": did,
+                "publicKeyMultibase": pub_key,
+            }
+        ]
+        document["authentication"] = [key_id]
+        document["assertionMethod"] = [key_id]
+
+    document["@context"] = contexts
+    # Move @context to the front of the serialized output.
+    ordered: dict[str, object] = {"@context": contexts}
+    ordered.update(document)
+
+    return JSONResponse(ordered, media_type="application/did+json")
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
