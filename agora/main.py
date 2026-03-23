@@ -939,6 +939,24 @@ async def well_known_agent_card(request: Request) -> JSONResponse:
     )
 
 
+@app.get("/.well-known/did.json", tags=["meta"], include_in_schema=False)
+async def well_known_did_document() -> JSONResponse:
+    return JSONResponse(
+        {
+            "@context": ["https://www.w3.org/ns/did/v1"],
+            "id": "did:web:the-agora.dev",
+            "service": [
+                {
+                    "id": "did:web:the-agora.dev#registry",
+                    "type": "AgentRegistry",
+                    "serviceEndpoint": "https://the-agora.dev",
+                }
+            ],
+        },
+        media_type="application/did+json",
+    )
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def home_page(
     request: Request,
