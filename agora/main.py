@@ -978,6 +978,24 @@ async def well_known_did_document() -> JSONResponse:
     return JSONResponse(ordered, media_type="application/did+json")
 
 
+@app.get("/.well-known/agent-trust.json", tags=["meta"], include_in_schema=False)
+async def well_known_agent_trust() -> JSONResponse:
+    """OATR domain verification file.
+
+    Binds this domain to the Agora issuer entry in the Open Agent Trust
+    Registry (https://github.com/FransDevelopment/open-agent-trust-registry).
+    The public_key_fingerprint matches the KID of our registered Ed25519 key.
+    """
+    return JSONResponse(
+        {
+            "issuer_id": "agora",
+            # SHA-256 hash of the OATR issuer public key bytes (base64url, no padding).
+            # More rigorous than the KID label — unforgeable without the actual key material.
+            "public_key_fingerprint": "1KmwaGaKNEBRz1XFa5hthwcAgy79NtNUGhPiLRLiQpk",
+        }
+    )
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def home_page(
     request: Request,
