@@ -989,7 +989,9 @@ async def well_known_agent_trust() -> JSONResponse:
     return JSONResponse(
         {
             "issuer_id": "agora",
-            "public_key_fingerprint": "agora-2026-03",
+            # SHA-256 hash of the OATR issuer public key bytes (base64url, no padding).
+            # More rigorous than the KID label — unforgeable without the actual key material.
+            "public_key_fingerprint": "1KmwaGaKNEBRz1XFa5hthwcAgy79NtNUGhPiLRLiQpk",
         }
     )
 

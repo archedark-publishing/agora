@@ -16,4 +16,5 @@ async def test_well_known_agent_trust_json() -> None:
 
     payload = response.json()
     assert payload["issuer_id"] == "agora"
-    assert payload["public_key_fingerprint"] == "agora-2026-03"
+    # SHA-256 hash of OATR issuer public key bytes (base64url, no padding)
+    assert payload["public_key_fingerprint"] == "1KmwaGaKNEBRz1XFa5hthwcAgy79NtNUGhPiLRLiQpk"
