@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     admin_rate_limit_global: int = 300
     monthly_budget_cents: int | None = None
 
+    # DID verificationMethod: Ed25519 public key in multibase encoding (z-prefixed base58btc).
+    # When set, the /.well-known/did.json endpoint includes verificationMethod,
+    # authentication, and assertionMethod fields per W3C DID Core + Ed25519 2020 suite.
+    did_public_key_multibase: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

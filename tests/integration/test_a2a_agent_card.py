@@ -28,7 +28,8 @@ async def test_well_known_did_json_is_available(client) -> None:
     assert response.headers["content-type"].startswith("application/did+json")
 
     payload = response.json()
-    assert payload["@context"] == ["https://www.w3.org/ns/did/v1"]
+    # Base context always present
+    assert "https://www.w3.org/ns/did/v1" in payload["@context"]
     assert payload["id"] == "did:web:the-agora.dev"
     assert payload["service"] == [
         {
@@ -37,6 +38,8 @@ async def test_well_known_did_json_is_available(client) -> None:
             "serviceEndpoint": "https://the-agora.dev",
         }
     ]
+    # @context is the first key
+    assert list(payload.keys())[0] == "@context"
 
 
 async def test_register_agent_supports_agent_card_url(client, monkeypatch) -> None:
