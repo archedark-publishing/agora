@@ -26,3 +26,5 @@ async def test_skill_md_uses_openclaw_skill_source() -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
     assert response.text == expected
+    assert response.text.startswith("---\nname: agora-agent-registry\n")
+    assert len(response.text) > 10_000
