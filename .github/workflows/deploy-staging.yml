@@ -1,0 +1,153 @@
+name: Deploy Agora Staging
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref or branch to deploy to staging
+        required: false
+        type: string
+      pr_number:
+        description: Pull request number to deploy to staging
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-agora-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        !github.event.pull_request.draft &&
+        contains(
+          fromJSON('["archedark-ada","archedark","archedark-gavlan"]'),
+          github.event.pull_request.user.login
+        )
+      )
+    environment: staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve staging target
+        id: resolve_target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
+          INPUT_PR_NUMBER: ${{ github.event.inputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            target_refspec="refs/pull/$PR_NUMBER/head"
+            target_label="pr-$PR_NUMBER"
+          else
+            if [ -n "${INPUT_PR_NUMBER:-}" ]; then
+              target_refspec="refs/pull/$INPUT_PR_NUMBER/head"
+              target_label="pr-$INPUT_PR_NUMBER"
+            elif [ -n "${INPUT_REF:-}" ]; then
+              target_refspec="$INPUT_REF"
+              target_label="$INPUT_REF"
+            else
+              echo "Provide either ref or pr_number when manually dispatching staging deploys." >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "target_refspec=$target_refspec"
+            echo "target_label=$target_label"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify required staging secrets
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PRIVATE_KEY: ${{ secrets.EXE_DEPLOY_PRIVATE_KEY }}
+          EXE_KNOWN_HOSTS: ${{ secrets.EXE_KNOWN_HOSTS }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          test -n "$EXE_SSH_DEST"
+          test -n "$EXE_DEPLOY_PRIVATE_KEY"
+          test -n "$EXE_KNOWN_HOSTS"
+          test -n "$EXE_DEPLOY_PATH"
+
+      - name: Configure SSH
+        env:
+          EXE_DEPLOY_PRIVATE_KEY: ${{ secrets.EXE_DEPLOY_PRIVATE_KEY }}
+          EXE_KNOWN_HOSTS: ${{ secrets.EXE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$EXE_DEPLOY_PRIVATE_KEY" > "$HOME/.ssh/exe_deploy_key"
+          chmod 600 "$HOME/.ssh/exe_deploy_key"
+          printf '%s\n' "$EXE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy staging on VM
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+          REPO_HTTPS_URL: https://github.com/${{ github.repository }}.git
+          TARGET_REFSPEC: ${{ steps.resolve_target.outputs.target_refspec }}
+          TARGET_LABEL: ${{ steps.resolve_target.outputs.target_label }}
+        run: |
+          set -euo pipefail
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -i "$HOME/.ssh/exe_deploy_key" "$EXE_SSH_DEST" \
+            "REPO_HTTPS_URL='$REPO_HTTPS_URL' TARGET_REFSPEC='$TARGET_REFSPEC' TARGET_LABEL='$TARGET_LABEL' DEPLOY_PATH='$EXE_DEPLOY_PATH' bash -se" <<'EOF'
+          set -euo pipefail
+
+          mkdir -p "$DEPLOY_PATH"
+          cd "$DEPLOY_PATH"
+          if [ ! -f ".env" ]; then
+            echo "Missing $DEPLOY_PATH/.env on VM; deployment stopped." >&2
+            exit 1
+          fi
+
+          if [ ! -d ".git" ]; then
+            git init
+            git remote add origin "$REPO_HTTPS_URL"
+          fi
+
+          git fetch --prune origin "$TARGET_REFSPEC"
+          git checkout -B staging-deploy FETCH_HEAD
+          echo "Deploying $TARGET_LABEL at commit $(git rev-parse --short HEAD) on $(hostname)"
+
+          docker compose up -d --build --force-recreate --remove-orphans
+          docker compose ps
+          EOF
+
+      - name: Smoke check staging deployment
+        env:
+          STAGING_BASE_URL: https://staging.the-agora.dev
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            --output /dev/null \
+            "$STAGING_BASE_URL/"
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$STAGING_BASE_URL/api/v1/health" \
+            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert payload["status"] == "healthy", payload'
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$STAGING_BASE_URL/api/v1/agents" \
+            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert isinstance(payload.get("agents"), list), payload'

@@ -76,6 +76,7 @@ For other setup options, see [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
 | Guide | Purpose |
 |-------|---------|
 | [`QUICKSTART.md`](docs/QUICKSTART.md) | Get running locally or in production |
+| [`DEPLOY.md`](DEPLOY.md) | Production and staging deployment workflow |
 | [`FIRST_AGENT_API.md`](docs/FIRST_AGENT_API.md) | Full agent lifecycle walkthrough |
 | [`API_REFERENCE.md`](docs/API_REFERENCE.md) | Endpoint specs and status codes |
 | [`.agents/skills/agora-agent-registry/SKILL.md`](.agents/skills/agora-agent-registry/SKILL.md) | Agent-native workflow for self-registration, updates, discovery, and recovery |

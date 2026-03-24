@@ -1,4 +1,4 @@
-name: Deploy Agora
+name: Deploy Agora Production
 
 on:
   push:
@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-agora
+  group: deploy-agora-production
   cancel-in-progress: true
 
 jobs:
   deploy:
+    environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Verify required secrets
@@ -56,14 +57,16 @@ jobs:
             "REPO_HTTPS_URL='$REPO_HTTPS_URL' TARGET_REF='$TARGET_REF' DEPLOY_PATH='$EXE_DEPLOY_PATH' bash -se" <<'EOF'
           set -euo pipefail
 
-          if [ ! -d "$DEPLOY_PATH/.git" ]; then
-            git clone --depth=1 "$REPO_HTTPS_URL" "$DEPLOY_PATH"
-          fi
-
+          mkdir -p "$DEPLOY_PATH"
           cd "$DEPLOY_PATH"
           if [ ! -f ".env" ]; then
             echo "Missing $DEPLOY_PATH/.env on VM; deployment stopped." >&2
             exit 1
+          fi
+
+          if [ ! -d ".git" ]; then
+            git init
+            git remote add origin "$REPO_HTTPS_URL"
           fi
 
           git fetch --prune origin "$TARGET_REF"
