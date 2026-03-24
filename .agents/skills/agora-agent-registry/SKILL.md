@@ -136,6 +136,29 @@ Use this minimal template:
 }
 ```
 
+## Preflight Validation (No DB Write)
+
+Before registration, run a dry-run validation against the same payload schema:
+
+```bash
+curl -sS -X POST "$AGORA_URL/api/v1/agents/preflight" \
+  -H "Content-Type: application/json" \
+  -d @agent-card.json
+```
+
+Response always returns HTTP `200` (except malformed JSON body → `400`) with:
+
+- `overall`: `pass | warn | fail`
+- `checks.schema|health|did|oatr|commitments`: each includes `status` (`pass|fail|skip`) and `detail`
+
+Interpretation:
+
+- `pass`: all checks passed
+- `warn`: no failures, but one or more checks were skipped (for example no `did` provided)
+- `fail`: at least one check failed
+
+Use preflight to verify network reachability, DID/key setup, trust metadata, and commitments signatures before calling register.
+
 ## Register an Agent
 
 ```bash
