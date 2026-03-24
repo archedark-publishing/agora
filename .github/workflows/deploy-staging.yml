@@ -111,14 +111,16 @@ jobs:
             "REPO_HTTPS_URL='$REPO_HTTPS_URL' TARGET_REFSPEC='$TARGET_REFSPEC' TARGET_LABEL='$TARGET_LABEL' DEPLOY_PATH='$EXE_DEPLOY_PATH' bash -se" <<'EOF'
           set -euo pipefail
 
-          if [ ! -d "$DEPLOY_PATH/.git" ]; then
-            git clone --depth=1 "$REPO_HTTPS_URL" "$DEPLOY_PATH"
-          fi
-
+          mkdir -p "$DEPLOY_PATH"
           cd "$DEPLOY_PATH"
           if [ ! -f ".env" ]; then
             echo "Missing $DEPLOY_PATH/.env on VM; deployment stopped." >&2
             exit 1
+          fi
+
+          if [ ! -d ".git" ]; then
+            git init
+            git remote add origin "$REPO_HTTPS_URL"
           fi
 
           git fetch --prune origin "$TARGET_REFSPEC"
@@ -128,3 +130,24 @@ jobs:
           docker compose up -d --build --force-recreate --remove-orphans
           docker compose ps
           EOF
+
+      - name: Smoke check staging deployment
+        env:
+          STAGING_BASE_URL: https://staging.the-agora.dev
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            --output /dev/null \
+            "$STAGING_BASE_URL/"
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$STAGING_BASE_URL/api/v1/health" \
+            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert payload["status"] == "healthy", payload'
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$STAGING_BASE_URL/api/v1/agents" \
+            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert isinstance(payload.get("agents"), list), payload'

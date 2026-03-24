@@ -21,6 +21,22 @@ async def test_well_known_agent_json_is_available(client) -> None:
     assert payload["contact"]["url"] == "http://testserver/api/v1/agents"
 
 
+async def test_well_known_agent_json_prefers_forwarded_public_url(client) -> None:
+    response = await client.get(
+        "/.well-known/agent.json",
+        headers={
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "staging.the-agora.dev",
+        },
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["url"] == "https://staging.the-agora.dev"
+    assert payload["contact"]["url"] == "https://staging.the-agora.dev/api/v1/agents"
+
+
 async def test_well_known_did_json_is_available(client) -> None:
     response = await client.get("/.well-known/did.json")
 

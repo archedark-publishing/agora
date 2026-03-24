@@ -941,9 +941,20 @@ async def skill_markdown() -> PlainTextResponse:
     return PlainTextResponse(_load_skill_markdown(), media_type="text/markdown")
 
 
+def _request_public_base_url(request: Request) -> str:
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if not forwarded_host:
+        return str(request.base_url).rstrip("/")
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    proto = forwarded_proto.split(",", maxsplit=1)[0].strip() or request.url.scheme
+    host = forwarded_host.split(",", maxsplit=1)[0].strip()
+    return f"{proto}://{host}".rstrip("/")
+
+
 @app.get("/.well-known/agent.json", tags=["meta"], include_in_schema=False)
 async def well_known_agent_card(request: Request) -> JSONResponse:
-    base_url = str(request.base_url).rstrip("/")
+    base_url = _request_public_base_url(request)
     return JSONResponse(
         {
             "name": "Agent Agora",
