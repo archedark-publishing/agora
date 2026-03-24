@@ -22,7 +22,14 @@ def _valid_card(url: str, *, protocol_version: str = "0.3.0") -> dict[str, objec
     }
 
 
-def _agent(url: str, *, econ_id: str | None = None) -> Agent:
+def _agent(
+    url: str,
+    *,
+    econ_id: str | None = None,
+    commitments_url: str | None = None,
+    did: str | None = None,
+    did_verified: bool = False,
+) -> Agent:
     return Agent(
         name="Health Test Agent",
         description="Health checker unit test agent.",
@@ -38,6 +45,10 @@ def _agent(url: str, *, econ_id: str | None = None) -> Agent:
         owner_key_hash=None,
         health_status="unknown",
         econ_id=econ_id,
+        did=did,
+        did_verified=did_verified,
+        commitments_url=commitments_url,
+        commitment_verified=False,
         erc8004_verified=False,
     )
 
@@ -235,3 +246,42 @@ async def test_check_single_agent_verifies_or_populates_econ_id_from_erc8004_reg
     assert healthy is True
     assert missing_agent.erc8004_verified is True
     assert missing_agent.econ_id == "eip155:1:0x742d35Cc6634C0532925a3b844Bc454e4438f44e:22"
+
+
+async def test_check_single_agent_recomputes_commitment_verification(monkeypatch) -> None:
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/.well-known/agent-card.json":
+            return httpx.Response(200, json=_valid_card("https://example.com/agents/demo"), request=request)
+        return httpx.Response(404, request=request)
+
+    async def _fake_verify_commitments_document(**kwargs) -> bool:
+        return bool(kwargs["did_verified"]) and kwargs["did"] == "did:web:commitments.example"
+
+    monkeypatch.setattr(
+        "agora.health_checker.assert_url_safe_for_outbound",
+        lambda _url, allow_private=False: SimpleNamespace(
+            hostname="example.com",
+            pinned_ip="93.184.216.34",
+        ),
+    )
+    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    monkeypatch.setattr("agora.health_checker.verify_commitments_document", _fake_verify_commitments_document)
+
+    agent = _agent(
+        "https://example.com/agents/demo",
+        commitments_url="https://commitments.example/.well-known/agent-commitments.json",
+        did="did:web:commitments.example",
+        did_verified=True,
+    )
+    now_utc = datetime.now(tz=timezone.utc)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        healthy = await _check_single_agent(
+            agent,
+            client,
+            now_utc,
+            allow_private_network_targets=False,
+        )
+
+    assert healthy is True
+    assert agent.commitment_verified is True

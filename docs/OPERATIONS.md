@@ -41,7 +41,7 @@ Copy `.env.example` to `.env` and adjust as needed.
   - Checks only agents queried in the last 24 hours.
   - Probe order per agent: `/.well-known/agent-card.json` (primary), then `agent.url`, then origin `/`.
   - Also attempts ERC-8004 discovery at `https://<agent-domain>/.well-known/agent-registration.json`.
-  - Updates `health_status`, `last_health_check`, `last_healthy_at`, `protocol_version` (from fetched card when available), `econ_id` (when auto-populated), and `erc8004_verified`.
+  - Updates `health_status`, `last_health_check`, `last_healthy_at`, `protocol_version` (from fetched card when available), `econ_id` (when auto-populated), `erc8004_verified`, and `commitment_verified` (when `commitments_url` + verified DID are present).
   - Does not delete stale agents.
 
 - Registry refresher:

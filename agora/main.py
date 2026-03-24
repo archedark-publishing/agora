@@ -28,6 +28,7 @@ from sqlalchemy import Text, and_, case, cast, desc, func, not_, or_, select, te
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agora.commitments import verify_commitments_document
 from agora.config import get_settings
 from agora.database import AsyncSessionLocal, close_engine, get_db_session, run_health_query
 from agora.erc8004 import discover_erc8004_registration_econ_id, resolve_erc8004_verification
@@ -304,6 +305,14 @@ class RegisterAgentRequest(BaseModel):
         description=(
             "Optional URL for external legal-entity verification associated with the agent "
             "(for example https://api.corpo.llc/api/v1/entities/{id}/verify)."
+        ),
+    )
+    commitments_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description=(
+            "Optional URL pointing to the agent commitments declaration "
+            "(for example https://agent.example/.well-known/agent-commitments.json)."
         ),
     )
     protocol_version: str | None = Field(
@@ -1051,6 +1060,7 @@ async def home_page(
                 "public_incident_count": summary.get("public_incident_count", 0),
                 "protocol_version": agent.protocol_version,
                 "erc8004_verified": agent.erc8004_verified,
+                "commitment_verified": agent.commitment_verified,
             }
         )
 
@@ -2324,6 +2334,11 @@ async def register_agent(
         value=registration_request.entity_verification_url,
         max_length=2048,
     )
+    commitments_url = _normalize_optional_url_field(
+        field_name="commitments_url",
+        value=registration_request.commitments_url,
+        max_length=2048,
+    )
     protocol_version = _normalize_optional_string_field(
         field_name="protocol_version",
         value=registration_request.protocol_version,
@@ -2345,6 +2360,8 @@ async def register_agent(
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
     sanitized_payload.pop("entity_verification_url", None)
+    sanitized_payload.pop("commitments_url", None)
+    sanitized_payload.pop("commitment_verified", None)
     sanitized_payload.pop("protocol_version", None)
     sanitized_payload.pop("availability", None)
 
@@ -2407,6 +2424,13 @@ async def register_agent(
 
     econ_id, erc8004_verified = await _compute_erc8004_verification(normalized_url, econ_id)
 
+    commitment_verified = await verify_commitments_document(
+        commitments_url=commitments_url,
+        did=did,
+        did_verified=False,
+        allow_private_network_targets=settings.allow_private_network_targets,
+    )
+
     normalized_card = validated.card.model_dump(by_alias=True, mode="json")
     normalized_card["url"] = normalized_url
     if econ_id is not None:
@@ -2415,6 +2439,8 @@ async def register_agent(
         normalized_card["did"] = did
     if entity_verification_url is not None:
         normalized_card["entity_verification_url"] = entity_verification_url
+    if commitments_url is not None:
+        normalized_card["commitments_url"] = commitments_url
 
     normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
     if normalized_operator is None:
@@ -2439,6 +2465,8 @@ async def register_agent(
         did=did,
         did_verified=False,
         entity_verification_url=entity_verification_url,
+        commitments_url=commitments_url,
+        commitment_verified=commitment_verified,
         erc8004_verified=erc8004_verified,
         operator=normalized_operator,
         availability=availability,
@@ -2801,11 +2829,13 @@ async def verify_did(
 
     if not agent.did.startswith("did:web:"):
         agent.did_verified = False
+        agent.commitment_verified = False
         await session.commit()
         return {
             "agent_id": str(agent.id),
             "did": agent.did,
             "did_verified": False,
+            "commitment_verified": False,
             "verified": False,
             "message": "DID method is not did:web; verification skipped",
         }
@@ -2831,6 +2861,7 @@ async def verify_did(
 
     if did_document.get("id") != agent.did:
         agent.did_verified = False
+        agent.commitment_verified = False
         await session.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2838,11 +2869,18 @@ async def verify_did(
         )
 
     agent.did_verified = True
+    agent.commitment_verified = await verify_commitments_document(
+        commitments_url=agent.commitments_url,
+        did=agent.did,
+        did_verified=agent.did_verified,
+        allow_private_network_targets=settings.allow_private_network_targets,
+    )
     await session.commit()
     return {
         "agent_id": str(agent.id),
         "did": agent.did,
         "did_verified": True,
+        "commitment_verified": agent.commitment_verified,
         "verified": True,
         "message": "DID verified successfully",
     }
@@ -2937,6 +2975,8 @@ async def get_agent_detail(
         "did": agent.did,
         "did_verified": agent.did_verified,
         "entity_verification_url": agent.entity_verification_url,
+        "commitments_url": agent.commitments_url,
+        "commitment_verified": agent.commitment_verified,
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
         "availability": agent.availability,
@@ -3390,6 +3430,8 @@ async def update_agent(
     _upgrade_owner_key_hash_if_needed(agent, api_key)
 
     previous_econ_id = agent.econ_id
+    previous_did = agent.did
+    previous_did_verified = agent.did_verified
     previous_operator_identity = _operator_claim_identity(agent.operator)
     previous_operator_verified = _operator_claim_is_verified(agent.operator)
 
@@ -3405,6 +3447,11 @@ async def update_agent(
         value=sanitized_payload.get("entity_verification_url"),
         max_length=2048,
     )
+    commitments_url = _normalize_optional_url_field(
+        field_name="commitments_url",
+        value=sanitized_payload.get("commitments_url"),
+        max_length=2048,
+    )
     protocol_version = _normalize_optional_string_field(
         field_name="protocol_version",
         value=sanitized_payload.get("protocol_version"),
@@ -3417,6 +3464,8 @@ async def update_agent(
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
     sanitized_payload.pop("entity_verification_url", None)
+    sanitized_payload.pop("commitments_url", None)
+    sanitized_payload.pop("commitment_verified", None)
     sanitized_payload.pop("protocol_version", None)
     sanitized_payload.pop("availability", None)
 
@@ -3482,6 +3531,8 @@ async def update_agent(
         normalized_card["did"] = did
     if entity_verification_url is not None:
         normalized_card["entity_verification_url"] = entity_verification_url
+    if commitments_url is not None:
+        normalized_card["commitments_url"] = commitments_url
 
     normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
     if normalized_operator is None:
@@ -3491,6 +3542,14 @@ async def update_agent(
         if previous_operator_verified and incoming_operator_identity == previous_operator_identity:
             normalized_operator["verified"] = True
         normalized_card["operator"] = normalized_operator
+
+    did_verified = previous_did_verified if did == previous_did else False
+    commitment_verified = await verify_commitments_document(
+        commitments_url=commitments_url,
+        did=did,
+        did_verified=did_verified,
+        allow_private_network_targets=settings.allow_private_network_targets,
+    )
 
     agent.name = validated.card.name
     agent.description = validated.card.description
@@ -3504,8 +3563,10 @@ async def update_agent(
     agent.output_modes = validated.output_modes
     agent.econ_id = econ_id
     agent.did = did
-    agent.did_verified = False
+    agent.did_verified = did_verified
     agent.entity_verification_url = entity_verification_url
+    agent.commitments_url = commitments_url
+    agent.commitment_verified = commitment_verified
     agent.operator = normalized_operator
     agent.availability = availability
 
@@ -3736,6 +3797,8 @@ async def list_agents(
                 "did": agent.did,
                 "did_verified": agent.did_verified,
                 "entity_verification_url": agent.entity_verification_url,
+                "commitments_url": agent.commitments_url,
+                "commitment_verified": agent.commitment_verified,
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,
                 "operator_verified": _operator_claim_is_verified(agent.operator),

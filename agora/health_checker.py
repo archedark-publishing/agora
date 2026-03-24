@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agora.commitments import verify_commitments_document
 from agora.erc8004 import discover_erc8004_registration_econ_id, resolve_erc8004_verification
 from agora.models import Agent
 from agora.query_tracker import QueryTracker
@@ -129,6 +130,14 @@ async def _check_single_agent(
     verification = resolve_erc8004_verification(agent.econ_id, discovered_econ_id)
     agent.econ_id = verification.econ_id
     agent.erc8004_verified = verification.verified
+
+    agent.commitment_verified = await verify_commitments_document(
+        commitments_url=agent.commitments_url,
+        did=agent.did,
+        did_verified=agent.did_verified,
+        allow_private_network_targets=allow_private_network_targets,
+        client=client,
+    )
 
     return is_healthy
 

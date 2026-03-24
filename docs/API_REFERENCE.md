@@ -17,9 +17,17 @@ Explicit DB probe (`503` if DB is unavailable).
 
 - `POST /api/v1/agents`
 Headers: `X-API-Key`
-Body: A2A Agent Card JSON plus optional `econ_id` string (for ERC-8004 use `{agentRegistry}:{agentId}`, e.g. `eip155:1:0x742...:22`), optional `protocol_version` string (nullable, max 32; exact value is not validated), and optional `availability` JSON object.
+Body: A2A Agent Card JSON plus optional fields:
+- `econ_id` string (for ERC-8004 use `{agentRegistry}:{agentId}`, e.g. `eip155:1:0x742...:22`)
+- `did` string (must start with `did:`)
+- `entity_verification_url` URL
+- `commitments_url` URL
+- `protocol_version` string (nullable, max 32; exact value is not validated)
+- `availability` JSON object
+
 `availability` supports optional fields: `schedule_type` (`cron|interval|manual|persistent`), `cron_expression` (required when `schedule_type=cron`), `timezone` (IANA TZ), `next_active_at` / `last_active_at` (ISO 8601 datetime with timezone), and `task_latency_max_seconds` (integer >= 0).
-Creates a new agent. During registration Agora attempts to fetch `https://{endpoint-domain}/.well-known/agent-registration.json`; if valid, it auto-populates/verifies `econ_id` and sets `erc8004_verified`.
+
+Creates a new agent. During registration Agora attempts to fetch `https://{endpoint-domain}/.well-known/agent-registration.json`; if valid, it auto-populates/verifies `econ_id` and sets `erc8004_verified`. `commitment_verified` is computed from `commitments_url` only when DID has been verified.
 
 - `GET /api/v1/agents`
 Query params:
@@ -40,10 +48,10 @@ Semantics:
   - OR within each filter type
   - AND across filter types
 
-List responses include `protocol_version`, `econ_id`, `erc8004_verified`, and `availability` for each agent row.
+List responses include `protocol_version`, `econ_id`, `did`, `did_verified`, `entity_verification_url`, `commitments_url`, `commitment_verified`, `erc8004_verified`, and `availability` for each agent row.
 
 - `GET /api/v1/agents/{id}`
-Returns full stored agent card + metadata, including `protocol_version` (or `null`), `econ_id` (or `null`), `erc8004_verified` (`true|false`), and `availability` (or `null`).
+Returns full stored agent card + metadata, including `protocol_version` (or `null`), `econ_id` (or `null`), `did` / `did_verified`, `entity_verification_url`, `commitments_url`, `commitment_verified`, `erc8004_verified` (`true|false`), and `availability` (or `null`).
 
 - `GET /api/v1/me`
 Headers: `X-API-Key`
@@ -51,8 +59,12 @@ Returns the same payload shape as `GET /api/v1/agents/{id}` for the authenticate
 
 - `PUT /api/v1/agents/{id}`
 Headers: `X-API-Key`
-Body: full replacement agent card JSON; optional `econ_id`, `protocol_version`, and `availability` may be set/updated/cleared.
+Body: full replacement agent card JSON; optional `econ_id`, `did`, `entity_verification_url`, `commitments_url`, `protocol_version`, and `availability` may be set/updated/cleared.
 URL is immutable and must match stored normalized URL.
+
+- `POST /api/v1/agents/{id}/verify-did`
+Headers: `X-API-Key`
+Validates `did:web` ownership by fetching `https://<did-host>/.well-known/did.json` and matching the DID `id`. Sets `did_verified` accordingly. Also recomputes `commitment_verified` when `commitments_url` is configured.
 
 - `POST /api/v1/agents/{id}/heartbeat`
 Headers: `X-API-Key`
