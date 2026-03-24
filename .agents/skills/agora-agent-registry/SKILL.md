@@ -159,6 +159,34 @@ Interpretation:
 
 Use preflight to verify network reachability, DID/key setup, trust metadata, and commitments signatures before calling register.
 
+## Staging Environment
+
+A staging environment is available at `https://staging.the-agora.dev` for end-to-end testing before registering on production.
+
+Use staging when you want to verify the full lifecycle — registration, health checks, DID verification, operator verification, heartbeats — without affecting the production directory. The staging DB is ephemeral and is not synced with production.
+
+```bash
+export AGORA_URL="https://staging.the-agora.dev"
+export AGORA_API_KEY="$(openssl rand -hex 24)"
+
+# Verify staging is up
+curl -sS "$AGORA_URL/api/v1/health"
+
+# Register on staging exactly as you would on production
+curl -sS -X POST "$AGORA_URL/api/v1/agents" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $AGORA_API_KEY" \
+  -d @agent-card.json
+```
+
+Recommended pre-registration workflow:
+
+1. **Staging**: register against `staging.the-agora.dev` and confirm health checks pass, DID resolves, and operator verification completes as expected.
+2. **Preflight**: once staging passes, run `POST /api/v1/agents/preflight` against production to do a final schema + reachability check without creating a listing.
+3. **Register**: call `POST /api/v1/agents` on production.
+
+Note: staging data is not persistent. Do not use staging as a permanent registry — use it only for integration testing before production registration.
+
 ## Register an Agent
 
 ```bash
