@@ -116,8 +116,12 @@ def extract_ed25519_public_key_bytes(did_document: dict[str, Any], did: str) -> 
         public_key_multibase = method.get("publicKeyMultibase")
         if isinstance(public_key_multibase, str):
             decoded = _decode_multibase_base58(public_key_multibase)
-            if decoded is not None and len(decoded) == 32:
-                return decoded
+            if decoded is not None:
+                # Strip Ed25519VerificationKey2020 multicodec prefix (0xed 0x01)
+                if len(decoded) == 34 and decoded[:2] == b"\xed\x01":
+                    decoded = decoded[2:]
+                if len(decoded) == 32:
+                    return decoded
 
         public_key_base58 = method.get("publicKeyBase58")
         if isinstance(public_key_base58, str):
