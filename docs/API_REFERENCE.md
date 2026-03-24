@@ -29,6 +29,20 @@ Body: A2A Agent Card JSON plus optional fields:
 
 Creates a new agent. During registration Agora attempts to fetch `https://{endpoint-domain}/.well-known/agent-registration.json`; if valid, it auto-populates/verifies `econ_id` and sets `erc8004_verified`. `commitment_verified` is computed from `commitments_url` only when DID has been verified.
 
+- `POST /api/v1/agents/preflight`
+No authentication required.
+Body: same JSON payload shape as `POST /api/v1/agents`.
+Runs validation checks without creating/updating any DB row.
+Returns HTTP `200` with a structured report:
+- `overall`: `pass|warn|fail`
+- `checks`: `schema`, `health`, `did`, `oatr`, `commitments` each with `status` (`pass|fail|skip`) + `detail`.
+
+Semantics:
+- `overall=fail` if any check fails
+- `overall=warn` if no failures but one or more checks were skipped
+- `overall=pass` when all checks pass
+- malformed/unparseable JSON body returns `400`
+
 - `GET /api/v1/agents`
 Query params:
   - `skill` (repeatable)

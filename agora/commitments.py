@@ -33,7 +33,9 @@ def _did_web_document_url(did: str) -> str:
     return f"https://{host}/.well-known/did.json"
 
 
-def _normalize_required_commitments_fields(payload: Any) -> dict[str, Any] | None:
+def normalize_commitments_payload(payload: Any) -> dict[str, Any] | None:
+    """Validate required top-level commitments payload fields."""
+
     if not isinstance(payload, dict):
         return None
 
@@ -94,7 +96,7 @@ def _decode_signature(signature: str) -> bytes | None:
     return None
 
 
-def _extract_ed25519_public_key_bytes(did_document: dict[str, Any], did: str) -> bytes | None:
+def extract_ed25519_public_key_bytes(did_document: dict[str, Any], did: str) -> bytes | None:
     verification_methods = did_document.get("verificationMethod")
     if not isinstance(verification_methods, list):
         return None
@@ -222,7 +224,7 @@ async def verify_commitments_document(
         if payload is None:
             return False
 
-        normalized_payload = _normalize_required_commitments_fields(payload)
+        normalized_payload = normalize_commitments_payload(payload)
         if normalized_payload is None:
             return False
 
@@ -237,7 +239,7 @@ async def verify_commitments_document(
         if did_document is None:
             return False
 
-        public_key = _extract_ed25519_public_key_bytes(did_document, did)
+        public_key = extract_ed25519_public_key_bytes(did_document, did)
         if public_key is None:
             return False
 

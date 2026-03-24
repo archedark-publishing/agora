@@ -3,6 +3,7 @@
 import asyncio
 import hmac
 import ipaddress
+import json
 import logging
 import math
 import re
@@ -28,11 +29,15 @@ from sqlalchemy import Text, and_, case, cast, desc, func, not_, or_, select, te
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agora.commitments import verify_commitments_document
+from agora.commitments import (
+    extract_ed25519_public_key_bytes,
+    normalize_commitments_payload,
+    verify_commitments_document,
+)
 from agora.config import get_settings
 from agora.database import AsyncSessionLocal, close_engine, get_db_session, run_health_query
 from agora.erc8004 import discover_erc8004_registration_econ_id, resolve_erc8004_verification
-from agora.health_checker import run_health_check_cycle
+from agora.health_checker import build_agent_card_probe_urls, run_health_check_cycle
 from agora.metrics import BoundedRequestMetrics
 from agora.models import (
     INCIDENT_CATEGORIES,
@@ -75,6 +80,8 @@ REPORT_HOLD_ACCOUNT_AGE_DAYS = 7
 REPORT_HOLD_DURATION = timedelta(hours=24)
 REPORT_RETRACTION_WINDOW = timedelta(hours=24)
 REPUTATION_ANOMALY_WINDOW = timedelta(days=7)
+PREFLIGHT_CHECK_TIMEOUT_SECONDS = 5
+PREFLIGHT_TOTAL_TIMEOUT_SECONDS = 15
 rate_limit_logger = logging.getLogger("agora.rate_limit")
 rate_limiter, rate_limiter_is_shared = create_rate_limiter(
     backend=settings.rate_limit_backend,
@@ -1668,6 +1675,413 @@ def _parse_availability_payload(raw: Any) -> dict[str, Any] | None:
     return serialized
 
 
+def _preflight_check_result(
+    *,
+    status_value: Literal["pass", "fail", "skip"],
+    detail: str | None,
+) -> dict[str, str | None]:
+    return {
+        "status": status_value,
+        "detail": detail,
+    }
+
+
+def _summarize_http_exception_detail(detail: Any) -> str:
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, dict):
+        errors = detail.get("errors")
+        if isinstance(errors, list) and errors:
+            first_error = errors[0]
+            if isinstance(first_error, dict):
+                field = str(first_error.get("field") or "payload")
+                message = str(first_error.get("message") or "Invalid value")
+                return f"{field}: {message}"
+        message = detail.get("message")
+        if isinstance(message, str) and message.strip():
+            return message
+    return "Validation failed"
+
+
+def _compute_preflight_overall(checks: dict[str, dict[str, str | None]]) -> Literal["pass", "warn", "fail"]:
+    statuses = [str(item.get("status") or "") for item in checks.values()]
+    if "fail" in statuses:
+        return "fail"
+    if "skip" in statuses:
+        return "warn"
+    return "pass"
+
+
+def _extract_preflight_oatr_url(payload: dict[str, Any]) -> str | None:
+    direct_url = payload.get("agent_trust_url")
+    if direct_url is not None:
+        return _normalize_optional_url_field(
+            field_name="agent_trust_url",
+            value=direct_url,
+            max_length=2048,
+        )
+
+    alias_url = payload.get("oatr_url")
+    if alias_url is not None:
+        return _normalize_optional_url_field(
+            field_name="oatr_url",
+            value=alias_url,
+            max_length=2048,
+        )
+
+    nested = payload.get("agent_trust")
+    if isinstance(nested, dict):
+        return _normalize_optional_url_field(
+            field_name="agent_trust.url",
+            value=nested.get("url"),
+            max_length=2048,
+        )
+
+    return None
+
+
+async def _prepare_preflight_schema_context(
+    sanitized_payload: dict[str, Any],
+) -> tuple[dict[str, str | None], dict[str, Any] | None]:
+    try:
+        registration_request = RegisterAgentRequest.model_validate(sanitized_payload)
+    except ValidationError as exc:
+        detail_payload = _validation_error_to_detail(
+            exc,
+            message="Invalid registration payload",
+        )
+        return _preflight_check_result(
+            status_value="fail",
+            detail=_summarize_http_exception_detail(detail_payload),
+        ), None
+
+    try:
+        agent_card_url = registration_request.agent_card_url
+        did = _normalize_optional_did_field(registration_request.did)
+        commitments_url = _normalize_optional_url_field(
+            field_name="commitments_url",
+            value=registration_request.commitments_url,
+            max_length=2048,
+        )
+        agent_trust_url = _extract_preflight_oatr_url(sanitized_payload)
+    except HTTPException as exc:
+        return _preflight_check_result(
+            status_value="fail",
+            detail=_summarize_http_exception_detail(exc.detail),
+        ), None
+
+    payload_for_validation = dict(sanitized_payload)
+    if agent_card_url:
+        try:
+            fetched_agent_card = await asyncio.wait_for(
+                _fetch_agent_card_from_url(agent_card_url),
+                timeout=PREFLIGHT_CHECK_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            return _preflight_check_result(
+                status_value="fail",
+                detail="agent_card_url fetch timed out",
+            ), None
+        except HTTPException as exc:
+            return _preflight_check_result(
+                status_value="fail",
+                detail=_summarize_http_exception_detail(exc.detail),
+            ), None
+
+        for key, value in fetched_agent_card.items():
+            if key == "name" and payload_for_validation.get("name"):
+                continue
+            if key == "description" and payload_for_validation.get("description"):
+                continue
+            payload_for_validation[key] = value
+
+    payload_for_validation.pop("agent_card_url", None)
+    payload_for_validation.pop("econ_id", None)
+    payload_for_validation.pop("did", None)
+    payload_for_validation.pop("did_verified", None)
+    payload_for_validation.pop("entity_verification_url", None)
+    payload_for_validation.pop("commitments_url", None)
+    payload_for_validation.pop("commitment_verified", None)
+    payload_for_validation.pop("protocol_version", None)
+    payload_for_validation.pop("availability", None)
+    payload_for_validation.pop("agent_trust_url", None)
+    payload_for_validation.pop("oatr_url", None)
+    payload_for_validation.pop("agent_trust", None)
+
+    try:
+        validated = validate_agent_card(payload_for_validation)
+    except AgentCardValidationError as exc:
+        first_error = exc.errors[0] if exc.errors else {"field": "payload", "message": "Invalid Agent Card"}
+        field = str(first_error.get("field") or "payload")
+        message = str(first_error.get("message") or "Invalid Agent Card")
+        return _preflight_check_result(
+            status_value="fail",
+            detail=f"{field}: {message}",
+        ), None
+
+    try:
+        normalized_url = normalize_url(str(validated.card.url))
+        assert_url_safe_for_registration(
+            normalized_url,
+            allow_private=settings.allow_private_network_targets,
+            allow_unresolvable=settings.allow_unresolvable_registration_hostnames,
+        )
+    except (URLNormalizationError, URLSafetyError) as exc:
+        return _preflight_check_result(
+            status_value="fail",
+            detail=f"url: {exc}",
+        ), None
+
+    return _preflight_check_result(
+        status_value="pass",
+        detail="Registration payload schema is valid",
+    ), {
+        "normalized_url": normalized_url,
+        "did": did,
+        "commitments_url": commitments_url,
+        "agent_trust_url": agent_trust_url,
+    }
+
+
+async def _run_preflight_health_check(normalized_url: str) -> dict[str, str | None]:
+    timeout = httpx.Timeout(PREFLIGHT_CHECK_TIMEOUT_SECONDS)
+    probe_urls = build_agent_card_probe_urls(normalized_url)
+    errors: list[str] = []
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for probe_url in probe_urls:
+            try:
+                safe_target = assert_url_safe_for_outbound(
+                    probe_url,
+                    allow_private=settings.allow_private_network_targets,
+                )
+            except URLSafetyError as exc:
+                errors.append(f"{probe_url}: {exc}")
+                continue
+
+            try:
+                async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+                    response = await client.get(probe_url, follow_redirects=False)
+            except httpx.HTTPError as exc:
+                errors.append(f"{probe_url}: {exc}")
+                continue
+
+            if response.status_code < 200 or response.status_code >= 300:
+                errors.append(f"{probe_url}: returned HTTP {response.status_code}")
+                continue
+
+            try:
+                payload = response.json()
+            except ValueError:
+                errors.append(f"{probe_url}: returned invalid JSON")
+                continue
+
+            try:
+                validate_agent_card(payload)
+            except AgentCardValidationError as exc:
+                first = exc.errors[0] if exc.errors else {"field": "agent_card", "message": "Invalid Agent Card"}
+                field = str(first.get("field") or "agent_card")
+                message = str(first.get("message") or "Invalid Agent Card")
+                errors.append(f"{probe_url}: {field}: {message}")
+                continue
+
+            return _preflight_check_result(
+                status_value="pass",
+                detail=f"Validated agent card at {probe_url}",
+            )
+
+    detail = errors[0] if errors else "Health probe failed"
+    return _preflight_check_result(status_value="fail", detail=detail)
+
+
+async def _run_preflight_did_check(did: str | None) -> dict[str, str | None]:
+    if did is None:
+        return _preflight_check_result(
+            status_value="skip",
+            detail="DID check skipped: did field not provided",
+        )
+
+    if not did.startswith("did:web:"):
+        return _preflight_check_result(
+            status_value="skip",
+            detail="DID check skipped: only did:web is currently verifiable",
+        )
+
+    try:
+        did_document_url = _did_web_document_url(did)
+    except ValueError as exc:
+        return _preflight_check_result(status_value="fail", detail=str(exc))
+
+    try:
+        safe_target = assert_url_safe_for_outbound(
+            did_document_url,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
+        return _preflight_check_result(status_value="fail", detail=str(exc))
+
+    try:
+        did_document = await _fetch_did_web_document(
+            did_document_url,
+            pinned_hostname=safe_target.hostname,
+            pinned_ip=safe_target.pinned_ip,
+        )
+    except HTTPException as exc:
+        return _preflight_check_result(
+            status_value="fail",
+            detail=_summarize_http_exception_detail(exc.detail),
+        )
+
+    public_key = extract_ed25519_public_key_bytes(did_document, did)
+    if public_key is None:
+        return _preflight_check_result(
+            status_value="fail",
+            detail="DID document resolved but no Ed25519 verification key was found",
+        )
+
+    return _preflight_check_result(
+        status_value="pass",
+        detail="DID verified and Ed25519 verification key extracted",
+    )
+
+
+async def _fetch_preflight_json_document(url: str, *, field_name: str) -> tuple[dict[str, Any] | None, str | None]:
+    timeout = httpx.Timeout(PREFLIGHT_CHECK_TIMEOUT_SECONDS)
+    try:
+        safe_target = assert_url_safe_for_outbound(
+            url,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
+        return None, str(exc)
+
+    try:
+        async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                response = await client.get(url)
+    except httpx.HTTPError as exc:
+        return None, f"{field_name} endpoint unreachable: {exc}"
+
+    if response.status_code < 200 or response.status_code >= 300:
+        return None, f"{field_name} endpoint returned HTTP {response.status_code}"
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, f"{field_name} endpoint returned invalid JSON"
+
+    if not isinstance(payload, dict):
+        return None, f"{field_name} payload must be a JSON object"
+
+    return payload, None
+
+
+async def _run_preflight_oatr_check(agent_trust_url: str | None) -> dict[str, str | None]:
+    if agent_trust_url is None:
+        return _preflight_check_result(
+            status_value="skip",
+            detail="OATR check skipped: agent_trust_url not provided",
+        )
+
+    payload, error = await _fetch_preflight_json_document(
+        agent_trust_url,
+        field_name="agent_trust_url",
+    )
+    if error:
+        return _preflight_check_result(status_value="fail", detail=error)
+    assert payload is not None
+
+    issuer_id = payload.get("issuer_id")
+    public_key_fingerprint = payload.get("public_key_fingerprint")
+    if not isinstance(issuer_id, str) or not issuer_id.strip():
+        return _preflight_check_result(
+            status_value="fail",
+            detail="agent_trust_url payload missing issuer_id",
+        )
+    if not isinstance(public_key_fingerprint, str) or not public_key_fingerprint.strip():
+        return _preflight_check_result(
+            status_value="fail",
+            detail="agent_trust_url payload missing public_key_fingerprint",
+        )
+
+    return _preflight_check_result(
+        status_value="pass",
+        detail="OATR metadata is reachable and structurally valid",
+    )
+
+
+async def _run_preflight_commitments_check(
+    *,
+    commitments_url: str | None,
+    did: str | None,
+    did_status: str,
+) -> dict[str, str | None]:
+    if commitments_url is None:
+        return _preflight_check_result(
+            status_value="skip",
+            detail="Commitments check skipped: commitments_url not provided",
+        )
+
+    payload, error = await _fetch_preflight_json_document(
+        commitments_url,
+        field_name="commitments_url",
+    )
+    if error:
+        return _preflight_check_result(status_value="fail", detail=error)
+    assert payload is not None
+
+    normalized_payload = normalize_commitments_payload(payload)
+    if normalized_payload is None:
+        return _preflight_check_result(
+            status_value="fail",
+            detail="Commitments payload must include agent_did, invariants[], and signature",
+        )
+
+    payload_did = str(normalized_payload["agent_did"]).strip()
+    if did is not None and payload_did != did:
+        return _preflight_check_result(
+            status_value="fail",
+            detail="commitments payload agent_did does not match provided did",
+        )
+
+    if did_status != "pass":
+        return _preflight_check_result(
+            status_value="skip",
+            detail="Commitments signature verification skipped because DID check did not pass",
+        )
+
+    verified = await verify_commitments_document(
+        commitments_url=commitments_url,
+        did=did,
+        did_verified=True,
+        allow_private_network_targets=settings.allow_private_network_targets,
+        timeout_seconds=PREFLIGHT_CHECK_TIMEOUT_SECONDS,
+    )
+    if not verified:
+        return _preflight_check_result(
+            status_value="fail",
+            detail="Commitments signature verification failed",
+        )
+
+    return _preflight_check_result(
+        status_value="pass",
+        detail="Commitments document signature verified",
+    )
+
+
+async def _run_preflight_check_with_timeout(
+    check_name: str,
+    coroutine: Any,
+) -> dict[str, str | None]:
+    try:
+        return await asyncio.wait_for(coroutine, timeout=PREFLIGHT_CHECK_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return _preflight_check_result(
+            status_value="fail",
+            detail=f"{check_name} check timed out after {PREFLIGHT_CHECK_TIMEOUT_SECONDS}s",
+        )
+
+
 def _normalize_optional_string_field(
     *,
     field_name: str,
@@ -2305,6 +2719,126 @@ def _upgrade_owner_key_hash_if_needed(agent: Agent, api_key: str) -> bool:
         return False
     agent.owner_key_hash = hash_api_key(api_key)
     return True
+
+
+@app.post("/api/v1/agents/preflight", tags=["agents"])
+async def preflight_agent_registration(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Malformed JSON body",
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Malformed JSON body",
+        )
+
+    sanitized_payload = sanitize_json_strings(payload)
+
+    async def _run_checks() -> dict[str, Any]:
+        checks: dict[str, dict[str, str | None]] = {
+            "schema": _preflight_check_result(status_value="skip", detail=None),
+            "health": _preflight_check_result(status_value="skip", detail=None),
+            "did": _preflight_check_result(status_value="skip", detail=None),
+            "oatr": _preflight_check_result(status_value="skip", detail=None),
+            "commitments": _preflight_check_result(status_value="skip", detail=None),
+        }
+
+        try:
+            schema_result, schema_context = await asyncio.wait_for(
+                _prepare_preflight_schema_context(sanitized_payload),
+                timeout=PREFLIGHT_CHECK_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            schema_result = _preflight_check_result(
+                status_value="fail",
+                detail=f"schema check timed out after {PREFLIGHT_CHECK_TIMEOUT_SECONDS}s",
+            )
+            schema_context = None
+
+        checks["schema"] = schema_result
+
+        if schema_context is None:
+            checks["health"] = _preflight_check_result(
+                status_value="skip",
+                detail="Health check skipped because schema check failed",
+            )
+            checks["did"] = _preflight_check_result(
+                status_value="skip",
+                detail="DID check skipped because schema check failed",
+            )
+            checks["oatr"] = _preflight_check_result(
+                status_value="skip",
+                detail="OATR check skipped because schema check failed",
+            )
+            checks["commitments"] = _preflight_check_result(
+                status_value="skip",
+                detail="Commitments check skipped because schema check failed",
+            )
+            return {
+                "overall": _compute_preflight_overall(checks),
+                "checks": checks,
+            }
+
+        health_result, did_result, oatr_result = await asyncio.gather(
+            _run_preflight_check_with_timeout(
+                "health",
+                _run_preflight_health_check(str(schema_context["normalized_url"])),
+            ),
+            _run_preflight_check_with_timeout(
+                "did",
+                _run_preflight_did_check(schema_context.get("did")),
+            ),
+            _run_preflight_check_with_timeout(
+                "oatr",
+                _run_preflight_oatr_check(schema_context.get("agent_trust_url")),
+            ),
+        )
+        checks["health"] = health_result
+        checks["did"] = did_result
+        checks["oatr"] = oatr_result
+
+        checks["commitments"] = await _run_preflight_check_with_timeout(
+            "commitments",
+            _run_preflight_commitments_check(
+                commitments_url=schema_context.get("commitments_url"),
+                did=schema_context.get("did"),
+                did_status=str(did_result.get("status") or "skip"),
+            ),
+        )
+
+        return {
+            "overall": _compute_preflight_overall(checks),
+            "checks": checks,
+        }
+
+    try:
+        return await asyncio.wait_for(
+            _run_checks(),
+            timeout=PREFLIGHT_TOTAL_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        timeout_checks: dict[str, dict[str, str | None]] = {
+            "schema": _preflight_check_result(
+                status_value="fail",
+                detail=f"preflight timed out after {PREFLIGHT_TOTAL_TIMEOUT_SECONDS}s",
+            ),
+            "health": _preflight_check_result(status_value="skip", detail="Skipped due global timeout"),
+            "did": _preflight_check_result(status_value="skip", detail="Skipped due global timeout"),
+            "oatr": _preflight_check_result(status_value="skip", detail="Skipped due global timeout"),
+            "commitments": _preflight_check_result(
+                status_value="skip",
+                detail="Skipped due global timeout",
+            ),
+        }
+        return {
+            "overall": "fail",
+            "checks": timeout_checks,
+        }
 
 
 @app.post("/api/v1/agents", status_code=status.HTTP_201_CREATED, tags=["agents"])
