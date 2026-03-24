@@ -1,4 +1,4 @@
-name: Deploy Agora
+name: Deploy Agora Production
 
 on:
   push:
@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-agora
+  group: deploy-agora-production
   cancel-in-progress: true
 
 jobs:
   deploy:
+    environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Verify required secrets
