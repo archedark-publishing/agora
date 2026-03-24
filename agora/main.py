@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, ValidationError, field_validator, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
@@ -122,6 +122,7 @@ SKILL_MD_FALLBACK = dedent(
 ).strip() + "\n"
 OPERATOR_VERIFICATION_TOKEN_PREFIX = "agora_verify_"
 OPERATOR_DNS_RESOLVER_URL = "https://dns.google/resolve"
+ANY_HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
 class ReliabilityReportCreate(BaseModel):
@@ -296,6 +297,14 @@ class RegisterAgentRequest(BaseModel):
         default=None,
         max_length=512,
         description="Optional W3C decentralized identifier. Must begin with did: when provided.",
+    )
+    entity_verification_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description=(
+            "Optional URL for external legal-entity verification associated with the agent "
+            "(for example https://api.corpo.llc/api/v1/entities/{id}/verify)."
+        ),
     )
     protocol_version: str | None = Field(
         default=None,
@@ -1665,6 +1674,40 @@ def _normalize_optional_string_field(
     return normalized
 
 
+def _normalize_optional_url_field(
+    *,
+    field_name: str,
+    value: Any,
+    max_length: int,
+) -> str | None:
+    normalized = _normalize_optional_string_field(
+        field_name=field_name,
+        value=value,
+        max_length=max_length,
+    )
+    if normalized is None:
+        return None
+
+    try:
+        parsed = ANY_HTTP_URL_ADAPTER.validate_python(normalized)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid Agent Card",
+                "errors": [
+                    {
+                        "field": field_name,
+                        "message": "Input should be a valid URL",
+                        "type": "value_error.url",
+                    }
+                ],
+            },
+        ) from exc
+
+    return str(parsed)
+
+
 def _normalize_optional_did_field(value: Any) -> str | None:
     did = _normalize_optional_string_field(field_name="did", value=value, max_length=512)
     if did is None:
@@ -2276,6 +2319,11 @@ async def register_agent(
         max_length=255,
     )
     did = _normalize_optional_did_field(registration_request.did)
+    entity_verification_url = _normalize_optional_url_field(
+        field_name="entity_verification_url",
+        value=registration_request.entity_verification_url,
+        max_length=2048,
+    )
     protocol_version = _normalize_optional_string_field(
         field_name="protocol_version",
         value=registration_request.protocol_version,
@@ -2296,6 +2344,7 @@ async def register_agent(
     sanitized_payload.pop("econ_id", None)
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
+    sanitized_payload.pop("entity_verification_url", None)
     sanitized_payload.pop("protocol_version", None)
     sanitized_payload.pop("availability", None)
 
@@ -2364,6 +2413,8 @@ async def register_agent(
         normalized_card["econ_id"] = econ_id
     if did is not None:
         normalized_card["did"] = did
+    if entity_verification_url is not None:
+        normalized_card["entity_verification_url"] = entity_verification_url
 
     normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
     if normalized_operator is None:
@@ -2387,6 +2438,7 @@ async def register_agent(
         econ_id=econ_id,
         did=did,
         did_verified=False,
+        entity_verification_url=entity_verification_url,
         erc8004_verified=erc8004_verified,
         operator=normalized_operator,
         availability=availability,
@@ -2884,6 +2936,7 @@ async def get_agent_detail(
         "econ_id": agent.econ_id,
         "did": agent.did,
         "did_verified": agent.did_verified,
+        "entity_verification_url": agent.entity_verification_url,
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
         "availability": agent.availability,
@@ -3347,6 +3400,11 @@ async def update_agent(
         max_length=255,
     )
     did = _normalize_optional_did_field(sanitized_payload.get("did"))
+    entity_verification_url = _normalize_optional_url_field(
+        field_name="entity_verification_url",
+        value=sanitized_payload.get("entity_verification_url"),
+        max_length=2048,
+    )
     protocol_version = _normalize_optional_string_field(
         field_name="protocol_version",
         value=sanitized_payload.get("protocol_version"),
@@ -3358,6 +3416,7 @@ async def update_agent(
     sanitized_payload.pop("econ_id", None)
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
+    sanitized_payload.pop("entity_verification_url", None)
     sanitized_payload.pop("protocol_version", None)
     sanitized_payload.pop("availability", None)
 
@@ -3421,6 +3480,8 @@ async def update_agent(
         normalized_card["econ_id"] = econ_id
     if did is not None:
         normalized_card["did"] = did
+    if entity_verification_url is not None:
+        normalized_card["entity_verification_url"] = entity_verification_url
 
     normalized_operator = _normalize_operator_claim(validated.card.operator, verified=False)
     if normalized_operator is None:
@@ -3444,6 +3505,7 @@ async def update_agent(
     agent.econ_id = econ_id
     agent.did = did
     agent.did_verified = False
+    agent.entity_verification_url = entity_verification_url
     agent.operator = normalized_operator
     agent.availability = availability
 
@@ -3469,6 +3531,23 @@ async def update_agent(
         "updated_at": agent.updated_at.isoformat(),
         "message": "Agent updated successfully",
     }
+
+
+@app.patch("/api/v1/agents/{agent_id}", tags=["agents"])
+async def patch_agent(
+    agent_id: UUID,
+    agent_card_payload: dict[str, Any],
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, str]:
+    return await update_agent(
+        agent_id=agent_id,
+        agent_card_payload=agent_card_payload,
+        request=request,
+        session=session,
+        api_key=api_key,
+    )
 
 
 @app.get("/api/v1/agents", tags=["agents"])
@@ -3656,6 +3735,7 @@ async def list_agents(
                 "econ_id": agent.econ_id,
                 "did": agent.did,
                 "did_verified": agent.did_verified,
+                "entity_verification_url": agent.entity_verification_url,
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,
                 "operator_verified": _operator_claim_is_verified(agent.operator),

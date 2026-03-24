@@ -97,6 +97,7 @@ class Agent(Base):
         server_default=text("false"),
         default=False,
     )
+    entity_verification_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     erc8004_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
