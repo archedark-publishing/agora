@@ -98,6 +98,13 @@ class Agent(Base):
         default=False,
     )
     entity_verification_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    commitments_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    commitment_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
     erc8004_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
