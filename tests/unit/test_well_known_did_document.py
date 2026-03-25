@@ -9,7 +9,10 @@ async def test_well_known_did_json_without_key() -> None:
     """When no public key is configured, serve the base DID document."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/.well-known/did.json")
+        response = await client.get(
+            "/.well-known/did.json",
+            headers={"x-forwarded-host": "the-agora.dev", "x-forwarded-proto": "https"},
+        )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/did+json")
@@ -42,7 +45,10 @@ async def test_well_known_did_json_with_verification_method(monkeypatch) -> None
     try:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            response = await client.get("/.well-known/did.json")
+            response = await client.get(
+                "/.well-known/did.json",
+                headers={"x-forwarded-host": "the-agora.dev", "x-forwarded-proto": "https"},
+            )
 
         assert response.status_code == 200
         payload = response.json()
@@ -69,3 +75,24 @@ async def test_well_known_did_json_with_verification_method(monkeypatch) -> None
         # Restore clean settings cache
         monkeypatch.delenv("DID_PUBLIC_KEY_MULTIBASE", raising=False)
         get_settings.cache_clear()
+
+
+async def test_well_known_did_json_uses_forwarded_host_for_staging() -> None:
+    """did.json id and serviceEndpoint must reflect the actual request host so that
+    staging.the-agora.dev returns did:web:staging.the-agora.dev, not the production DID."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/.well-known/did.json",
+            headers={
+                "x-forwarded-host": "staging.the-agora.dev",
+                "x-forwarded-proto": "https",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["id"] == "did:web:staging.the-agora.dev"
+    assert payload["service"][0]["id"] == "did:web:staging.the-agora.dev#registry"
+    assert payload["service"][0]["serviceEndpoint"] == "https://staging.the-agora.dev"
