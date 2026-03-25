@@ -976,8 +976,10 @@ async def well_known_agent_card(request: Request) -> JSONResponse:
 
 
 @app.get("/.well-known/did.json", tags=["meta"], include_in_schema=False)
-async def well_known_did_document() -> JSONResponse:
-    did = "did:web:the-agora.dev"
+async def well_known_did_document(request: Request) -> JSONResponse:
+    base_url = _request_public_base_url(request)
+    host = base_url.removeprefix("https://").removeprefix("http://")
+    did = f"did:web:{host}"
     contexts: list[str] = ["https://www.w3.org/ns/did/v1"]
     document: dict[str, object] = {
         "id": did,
@@ -985,7 +987,7 @@ async def well_known_did_document() -> JSONResponse:
             {
                 "id": f"{did}#registry",
                 "type": "AgentRegistry",
-                "serviceEndpoint": "https://the-agora.dev",
+                "serviceEndpoint": base_url,
             }
         ],
     }
