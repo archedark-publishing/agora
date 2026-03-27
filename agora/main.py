@@ -1080,6 +1080,7 @@ async def home_page(
                 "public_incident_count": summary.get("public_incident_count", 0),
                 "protocol_version": agent.protocol_version,
                 "erc8004_verified": agent.erc8004_verified,
+                "agent_json_verified": agent.agent_json_verified,
                 "commitment_verified": agent.commitment_verified,
             }
         )
@@ -1112,6 +1113,7 @@ async def search_page(
     health: str | None = Query(default=None),
     stale: str | None = Query(default=None),
     did_verified: bool | None = Query(default=None),
+    agent_json_verified: bool | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> HTMLResponse:
@@ -1143,6 +1145,7 @@ async def search_page(
         has_did=None,
         econ_id=None,
         did_verified=did_verified,
+        agent_json_verified=agent_json_verified,
         operator_verified=None,
         has_protocol_version=None,
         protocol_version=None,
@@ -1181,6 +1184,7 @@ async def search_page(
             "query": q or "",
             "health_filter": health_filter_ui,
             "did_verified_filter": did_verified is True,
+            "agent_json_verified_filter": agent_json_verified is True,
             "sort": request.query_params.get("sort", "recent"),
             "has_more": has_next,
             "filters": {
@@ -1191,6 +1195,7 @@ async def search_page(
                 "health": health or "",
                 "stale": stale or "",
                 "did_verified": did_verified,
+                "agent_json_verified": agent_json_verified,
                 "limit": limit,
                 "offset": offset,
             },
@@ -1812,6 +1817,7 @@ async def _prepare_preflight_schema_context(
     payload_for_validation.pop("econ_id", None)
     payload_for_validation.pop("did", None)
     payload_for_validation.pop("did_verified", None)
+    payload_for_validation.pop("agent_json_verified", None)
     payload_for_validation.pop("entity_verification_url", None)
     payload_for_validation.pop("commitments_url", None)
     payload_for_validation.pop("commitment_verified", None)
@@ -2917,6 +2923,7 @@ async def register_agent(
     sanitized_payload.pop("econ_id", None)
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
+    sanitized_payload.pop("agent_json_verified", None)
     sanitized_payload.pop("entity_verification_url", None)
     sanitized_payload.pop("commitments_url", None)
     sanitized_payload.pop("commitment_verified", None)
@@ -3468,6 +3475,10 @@ async def search_agents(
         default=None,
         description="Filter by whether DID verification is true.",
     ),
+    agent_json_verified: bool | None = Query(
+        default=None,
+        description="Filter by whether agent.json v1.4 verification is true.",
+    ),
     operator_verified: bool | None = Query(
         default=None,
         description="Filter by whether operator verification is true.",
@@ -3498,6 +3509,7 @@ async def search_agents(
         has_did=has_did,
         econ_id=econ_id,
         did_verified=did_verified,
+        agent_json_verified=agent_json_verified,
         operator_verified=operator_verified,
         has_protocol_version=has_protocol_version,
         protocol_version=protocol_version,
@@ -3532,6 +3544,7 @@ async def get_agent_detail(
         "econ_id": agent.econ_id,
         "did": agent.did,
         "did_verified": agent.did_verified,
+        "agent_json_verified": agent.agent_json_verified,
         "entity_verification_url": agent.entity_verification_url,
         "commitments_url": agent.commitments_url,
         "commitment_verified": agent.commitment_verified,
@@ -4021,6 +4034,7 @@ async def update_agent(
     sanitized_payload.pop("econ_id", None)
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
+    sanitized_payload.pop("agent_json_verified", None)
     sanitized_payload.pop("entity_verification_url", None)
     sanitized_payload.pop("commitments_url", None)
     sanitized_payload.pop("commitment_verified", None)
@@ -4193,6 +4207,10 @@ async def list_agents(
         default=None,
         description="Filter by whether DID verification is true.",
     ),
+    agent_json_verified: bool | None = Query(
+        default=None,
+        description="Filter by whether agent.json v1.4 verification is true.",
+    ),
     operator_verified: bool | None = Query(
         default=None,
         description="Filter by whether operator verification is true.",
@@ -4269,6 +4287,11 @@ async def list_agents(
         filters.append(Agent.did_verified.is_(True))
     elif did_verified is False:
         filters.append(Agent.did_verified.is_(False))
+
+    if agent_json_verified is True:
+        filters.append(Agent.agent_json_verified.is_(True))
+    elif agent_json_verified is False:
+        filters.append(Agent.agent_json_verified.is_(False))
 
     if operator_verified is True:
         filters.append(Agent.operator["verified"].astext == "true")
@@ -4354,6 +4377,7 @@ async def list_agents(
                 "econ_id": agent.econ_id,
                 "did": agent.did,
                 "did_verified": agent.did_verified,
+                "agent_json_verified": agent.agent_json_verified,
                 "entity_verification_url": agent.entity_verification_url,
                 "commitments_url": agent.commitments_url,
                 "commitment_verified": agent.commitment_verified,

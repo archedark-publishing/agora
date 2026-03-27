@@ -40,6 +40,7 @@ async def build_registry_snapshot(
                 "protocol_version": agent.protocol_version,
                 "econ_id": agent.econ_id,
                 "erc8004_verified": agent.erc8004_verified,
+                "agent_json_verified": agent.agent_json_verified,
                 "operator": agent.operator,
                 "operator_verified": bool(agent.operator and agent.operator.get("verified") is True),
                 "availability": agent.availability,

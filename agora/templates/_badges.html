@@ -65,3 +65,12 @@
     </span>
   {% endif %}
 {% endmacro %}
+
+{# agent.json v1.4 verification badge #}
+{% macro agent_json_badge(is_verified) %}
+  {% if is_verified %}
+    <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
+      agent.json v1.4
+    </span>
+  {% endif %}
+{% endmacro %}
