@@ -312,13 +312,13 @@ async def test_check_single_agent_verifies_agent_json_manifest(monkeypatch) -> N
         return httpx.Response(404, request=request)
 
     monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
+        "agora.agent_json.assert_url_safe_for_outbound",
         lambda _url, allow_private=False: SimpleNamespace(
             hostname="example.com",
             pinned_ip="93.184.216.34",
         ),
     )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -353,13 +353,13 @@ async def test_check_single_agent_fails_agent_json_domain_mismatch(monkeypatch) 
         return httpx.Response(404, request=request)
 
     monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
+        "agora.agent_json.assert_url_safe_for_outbound",
         lambda _url, allow_private=False: SimpleNamespace(
             hostname="example.com",
             pinned_ip="93.184.216.34",
         ),
     )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -401,13 +401,13 @@ async def test_check_single_agent_fails_agent_json_did_mismatch(monkeypatch) -> 
         return httpx.Response(404, request=request)
 
     monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
+        "agora.agent_json.assert_url_safe_for_outbound",
         lambda _url, allow_private=False: SimpleNamespace(
             hostname="example.com",
             pinned_ip="93.184.216.34",
         ),
     )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -431,13 +431,13 @@ async def test_check_single_agent_skips_when_agent_json_missing(monkeypatch) -> 
         return httpx.Response(404, request=request)
 
     monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
+        "agora.agent_json.assert_url_safe_for_outbound",
         lambda _url, allow_private=False: SimpleNamespace(
             hostname="example.com",
             pinned_ip="93.184.216.34",
         ),
     )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
