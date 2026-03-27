@@ -1085,8 +1085,9 @@ async def home_page(
         )
 
     return templates.TemplateResponse(
+        request,
         "home.html",
-        {
+        context={
             "request": request,
             "stats": {
                 "total_agents": total_agents,
@@ -1171,8 +1172,9 @@ async def search_page(
     }
 
     return templates.TemplateResponse(
+        request,
         "search.html",
-        {
+        context={
             "request": request,
             "results": safe_results,
             "agents": safe_results["agents"],
@@ -1246,8 +1248,9 @@ async def agent_detail_page(
     )
 
     return templates.TemplateResponse(
+        request,
         "agent_detail.html",
-        {
+        context={
             "request": request,
             "agent": agent,
             "health_history": [],
@@ -1292,8 +1295,9 @@ async def register_page(request: Request) -> HTMLResponse:
 
 If anything fails, check the error response and SKILL.md troubleshooting section."""
     return templates.TemplateResponse(
+        request,
         "register.html",
-        {
+        context={
             "request": request,
             "registry_base_url": registry_base_url,
             "register_endpoint": register_endpoint,
@@ -1307,8 +1311,9 @@ If anything fails, check the error response and SKILL.md troubleshooting section
 @app.get("/recover", response_class=HTMLResponse, include_in_schema=False)
 async def recover_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
+        request,
         "recover.html",
-        {
+        context={
             "request": request,
             "start_error": None,
             "complete_error": None,
@@ -1330,8 +1335,9 @@ async def recover_start_page(
         parsed_id = UUID(agent_id)
     except ValueError:
         return templates.TemplateResponse(
+            request,
             "recover.html",
-            {
+            context={
                 "request": request,
                 "start_error": "Invalid agent ID format",
                 "complete_error": None,
@@ -1347,8 +1353,9 @@ async def recover_start_page(
         result = await start_recovery(agent_id=parsed_id, request=request, session=session)
     except HTTPException as exc:
         return templates.TemplateResponse(
+            request,
             "recover.html",
-            {
+            context={
                 "request": request,
                 "start_error": exc.detail,
                 "complete_error": None,
@@ -1361,8 +1368,9 @@ async def recover_start_page(
         )
 
     return templates.TemplateResponse(
+        request,
         "recover.html",
-        {
+        context={
             "request": request,
             "start_error": None,
             "complete_error": None,
@@ -1387,8 +1395,9 @@ async def recover_complete_page(
         parsed_id = UUID(agent_id)
     except ValueError:
         return templates.TemplateResponse(
+            request,
             "recover.html",
-            {
+            context={
                 "request": request,
                 "start_error": None,
                 "complete_error": "Invalid agent ID format",
@@ -1410,8 +1419,9 @@ async def recover_complete_page(
         )
     except HTTPException as exc:
         return templates.TemplateResponse(
+            request,
             "recover.html",
-            {
+            context={
                 "request": request,
                 "start_error": None,
                 "complete_error": exc.detail,
@@ -1424,8 +1434,9 @@ async def recover_complete_page(
         )
 
     return templates.TemplateResponse(
+        request,
         "recover.html",
-        {
+        context={
             "request": request,
             "start_error": None,
             "complete_error": None,
