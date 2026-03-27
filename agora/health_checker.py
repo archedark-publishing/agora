@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agora.agent_json import verify_agent_json_manifest
 from agora.commitments import verify_commitments_document
 from agora.erc8004 import discover_erc8004_registration_econ_id, resolve_erc8004_verification
 from agora.models import Agent
@@ -137,6 +138,12 @@ async def _check_single_agent(
         did_verified=agent.did_verified,
         allow_private_network_targets=allow_private_network_targets,
         client=client,
+    )
+
+    agent.agent_json_verified = await verify_agent_json_manifest(
+        agent_url=agent.url,
+        client=client,
+        allow_private_network_targets=allow_private_network_targets,
     )
 
     return is_healthy

@@ -50,6 +50,14 @@ async def set_agent_health_state(
         await session.commit()
 
 
+async def set_agent_json_verified(*, name: str, verified: bool) -> None:
+    async with AsyncSessionLocal() as session:
+        agent = await session.scalar(select(Agent).where(Agent.name == name))
+        assert agent is not None
+        agent.agent_json_verified = verified
+        await session.commit()
+
+
 async def test_search_page_lists_registered_agents(client) -> None:
     payload = build_payload("Search Page Agent", "https://example.com/search-page-agent")
     register = await client.post(
@@ -301,3 +309,65 @@ async def test_search_page_supports_did_verified_filter(client, monkeypatch) -> 
     assert filtered.status_code == 200
     assert "Verified DID Search Agent" in filtered.text
     assert "Unverified DID Search Agent" not in filtered.text
+
+
+async def test_agents_api_supports_agent_json_verified_filter(client) -> None:
+    verified_name = "Verified agent.json Search Agent"
+    unverified_name = "Unverified agent.json Search Agent"
+
+    verified_register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(verified_name, "https://example.com/verified-agent-json-search-agent"),
+        headers={"X-API-Key": "agent-json-search-key"},
+    )
+    assert verified_register.status_code == 201
+
+    unverified_register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(unverified_name, "https://example.com/unverified-agent-json-search-agent"),
+        headers={"X-API-Key": "agent-json-search-key"},
+    )
+    assert unverified_register.status_code == 201
+
+    await set_agent_json_verified(name=verified_name, verified=True)
+
+    verified_only = await client.get("/api/v1/agents", params={"agent_json_verified": "true"})
+    assert verified_only.status_code == 200
+    assert verified_only.json()["total"] == 1
+    assert verified_only.json()["agents"][0]["name"] == verified_name
+
+    unverified_only = await client.get("/api/v1/agents", params={"agent_json_verified": "false"})
+    assert unverified_only.status_code == 200
+    assert unverified_only.json()["total"] == 1
+    assert unverified_only.json()["agents"][0]["name"] == unverified_name
+
+
+async def test_agent_detail_exposes_agent_json_verified_field(client) -> None:
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload("Detail agent.json Agent", "https://example.com/detail-agent-json-agent"),
+        headers={"X-API-Key": "agent-json-detail-key"},
+    )
+    assert register.status_code == 201
+
+    detail = await client.get(f"/api/v1/agents/{register.json()['id']}")
+    assert detail.status_code == 200
+    assert "agent_json_verified" in detail.json()
+    assert detail.json()["agent_json_verified"] is False
+
+
+async def test_search_page_shows_agent_json_badge_for_verified_agents(client) -> None:
+    agent_name = "Badge agent.json Search Agent"
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(agent_name, "https://example.com/badge-agent-json-search-agent"),
+        headers={"X-API-Key": "agent-json-search-badge-key"},
+    )
+    assert register.status_code == 201
+
+    await set_agent_json_verified(name=agent_name, verified=True)
+
+    response = await client.get("/search")
+    assert response.status_code == 200
+    assert agent_name in response.text
+    assert "agent.json v1.4" in response.text

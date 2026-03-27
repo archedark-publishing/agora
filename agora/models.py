@@ -65,6 +65,7 @@ class Agent(Base):
         Index("idx_agents_econ_id", "econ_id"),
         Index("idx_agents_did", "did"),
         Index("idx_agents_did_verified", "did_verified"),
+        Index("idx_agents_agent_json_verified", "agent_json_verified"),
         Index("idx_agents_protocol_version", "protocol_version"),
     )
 
@@ -92,6 +93,12 @@ class Agent(Base):
     econ_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     did: Mapped[str | None] = mapped_column(String(512), nullable=True)
     did_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
+    agent_json_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         server_default=text("false"),
