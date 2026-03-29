@@ -108,6 +108,8 @@ class Agent(Base):
     )
     entity_verification_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     commitments_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    commitments_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    commitments_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     commitment_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

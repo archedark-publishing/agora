@@ -1081,6 +1081,10 @@ async def home_page(
                 "protocol_version": agent.protocol_version,
                 "erc8004_verified": agent.erc8004_verified,
                 "agent_json_verified": agent.agent_json_verified,
+                "commitments_count": agent.commitments_count,
+                "commitments_summary": sanitize_ui_text(agent.commitments_summary, max_length=2000)
+                if agent.commitments_summary
+                else None,
                 "commitment_verified": agent.commitment_verified,
             }
         )
@@ -1245,6 +1249,9 @@ async def agent_detail_page(
         "version": safe_agent_card.get("version"),
         "skills": safe_agent_card.get("skills") or [],
         "agent_card_url": detail.get("agent_card_url"),
+        "commitments_url": detail.get("commitments_url"),
+        "commitments_count": detail.get("commitments_count"),
+        "commitments_summary": detail.get("commitments_summary"),
         "card": safe_agent_card,
     }
     reputation = await _build_reputation_payload(
@@ -3598,6 +3605,8 @@ async def get_agent_detail(
         "agent_json_verified": agent.agent_json_verified,
         "entity_verification_url": agent.entity_verification_url,
         "commitments_url": agent.commitments_url,
+        "commitments_count": agent.commitments_count,
+        "commitments_summary": agent.commitments_summary,
         "commitment_verified": agent.commitment_verified,
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
@@ -4447,6 +4456,8 @@ async def list_agents(
                 "agent_json_verified": agent.agent_json_verified,
                 "entity_verification_url": agent.entity_verification_url,
                 "commitments_url": agent.commitments_url,
+                "commitments_count": agent.commitments_count,
+                "commitments_summary": agent.commitments_summary,
                 "commitment_verified": agent.commitment_verified,
                 "erc8004_verified": agent.erc8004_verified,
                 "operator": agent.operator,

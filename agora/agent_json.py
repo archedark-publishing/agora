@@ -101,19 +101,76 @@ async def _fetch_json_document(
     return payload
 
 
-async def verify_agent_json_manifest_with_identity(
+def _inline_commitments_count(commitments_payload: Any) -> int | None:
+    if isinstance(commitments_payload, list):
+        return len(commitments_payload)
+
+    if not isinstance(commitments_payload, dict):
+        return None
+
+    for numeric_key in ("count", "commitment_count", "total"):
+        raw_value = commitments_payload.get(numeric_key)
+        if isinstance(raw_value, bool):
+            continue
+        if isinstance(raw_value, int) and raw_value >= 0:
+            return raw_value
+
+    for list_key in ("commitments", "items"):
+        raw_items = commitments_payload.get(list_key)
+        if isinstance(raw_items, list):
+            return len(raw_items)
+
+    return None
+
+
+def _inline_commitments_summary(commitments_payload: Any) -> str | None:
+    if not isinstance(commitments_payload, dict):
+        return None
+
+    raw_summary = commitments_payload.get("summary")
+    if not isinstance(raw_summary, str):
+        return None
+
+    normalized = raw_summary.strip()
+    if not normalized:
+        return None
+
+    return normalized[:2000]
+
+
+def _extract_inline_commitments_metadata(
+    *,
+    manifest_payload: dict[str, Any],
+    protocol_version: str,
+) -> tuple[int | None, str | None]:
+    if not protocol_version.startswith("1.4"):
+        return None, None
+
+    inline_commitments = manifest_payload.get("commitments")
+    if inline_commitments is None:
+        return None, None
+
+    return (
+        _inline_commitments_count(inline_commitments),
+        _inline_commitments_summary(inline_commitments),
+    )
+
+
+async def verify_agent_json_manifest_with_indexing_metadata(
     *,
     agent_url: str,
     client: httpx.AsyncClient,
     allow_private_network_targets: bool,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, int | None, str | None]:
     """
     Verify agent.json v1.4 schema + domain binding (+ optional DID binding).
 
     Returns:
-        tuple[bool, str | None]:
+        tuple[bool, str | None, int | None, str | None]:
             - verified flag
-            - identity.oatr_issuer_id extracted from the manifest when available
+            - identity.oatr_issuer_id extracted from the manifest
+            - inline commitments count (if provided)
+            - inline commitments summary (if provided)
     """
 
     manifest_url = build_agent_json_url(agent_url)
@@ -123,36 +180,40 @@ async def verify_agent_json_manifest_with_identity(
         allow_private_network_targets=allow_private_network_targets,
     )
     if manifest_payload is None:
-        return False, None
+        return False, None, None, None
 
     try:
         manifest = AgentJsonManifest.model_validate(manifest_payload)
     except ValidationError:
-        return False, None
-
-    oatr_issuer_id = manifest.identity.oatr_issuer_id if manifest.identity else None
+        return False, None, None, None
 
     try:
         registered_origin = _normalized_origin(agent_url)
         manifest_origin = _normalized_origin(str(manifest.url))
     except ValueError:
-        return False, oatr_issuer_id
+        return False, None, None, None
 
     if manifest_origin != registered_origin:
-        return False, oatr_issuer_id
+        return False, None, None, None
+
+    oatr_issuer_id = manifest.identity.oatr_issuer_id if manifest.identity else None
+    commitments_count, commitments_summary = _extract_inline_commitments_metadata(
+        manifest_payload=manifest_payload,
+        protocol_version=manifest.protocol_version,
+    )
 
     manifest_did = manifest.identity.did if manifest.identity else None
     if not manifest_did:
-        return True, oatr_issuer_id
+        return True, oatr_issuer_id, commitments_count, commitments_summary
 
     try:
         expected_did = _expected_did_web_id(agent_url)
         did_document_url = f"https://{urlsplit(agent_url).hostname}{_DID_DOCUMENT_PATH}"
     except ValueError:
-        return False, oatr_issuer_id
+        return False, None, None, None
 
     if manifest_did != expected_did:
-        return False, oatr_issuer_id
+        return False, None, None, None
 
     did_document = await _fetch_json_document(
         did_document_url,
@@ -161,9 +222,12 @@ async def verify_agent_json_manifest_with_identity(
     )
     if did_document is None:
         # Soft signal: keep manifest verified if DID endpoint is not yet reachable.
-        return True, oatr_issuer_id
+        return True, oatr_issuer_id, commitments_count, commitments_summary
 
-    return did_document.get("id") == expected_did, oatr_issuer_id
+    if did_document.get("id") != expected_did:
+        return False, None, None, None
+
+    return True, oatr_issuer_id, commitments_count, commitments_summary
 
 
 async def verify_agent_json_manifest(
@@ -174,9 +238,11 @@ async def verify_agent_json_manifest(
 ) -> bool:
     """Backward-compatible bool-only wrapper for agent.json verification."""
 
-    verified, _oatr_issuer_id = await verify_agent_json_manifest_with_identity(
-        agent_url=agent_url,
-        client=client,
-        allow_private_network_targets=allow_private_network_targets,
+    verified, _oatr_issuer_id, _commitments_count, _commitments_summary = (
+        await verify_agent_json_manifest_with_indexing_metadata(
+            agent_url=agent_url,
+            client=client,
+            allow_private_network_targets=allow_private_network_targets,
+        )
     )
     return verified

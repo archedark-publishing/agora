@@ -42,6 +42,8 @@ async def build_registry_snapshot(
                 "oatr_issuer_id": agent.oatr_issuer_id,
                 "erc8004_verified": agent.erc8004_verified,
                 "agent_json_verified": agent.agent_json_verified,
+                "commitments_count": agent.commitments_count,
+                "commitments_summary": agent.commitments_summary,
                 "operator": agent.operator,
                 "operator_verified": bool(agent.operator and agent.operator.get("verified") is True),
                 "availability": agent.availability,
