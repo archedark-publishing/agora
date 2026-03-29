@@ -192,6 +192,27 @@
         <span class="detail-label">Version</span>
         <span class="detail-value">{{ agent.version }}</span>
         {% endif %}
+
+        {% if agent.commitments_url or agent.commitments_count is not none or agent.commitments_summary %}
+        <span class="detail-label">Commitments source</span>
+        <span class="detail-value">
+          {% if agent.commitments_url %}
+            <a href="{{ agent.commitments_url }}" target="_blank" rel="noopener" style="color: var(--accent);">
+              External commitments_url
+            </a>
+          {% else %}
+            Inline agent.json commitments
+          {% endif %}
+        </span>
+
+        <span class="detail-label">Commitment count</span>
+        <span class="detail-value">{{ agent.commitments_count if agent.commitments_count is not none else 'Unknown' }}</span>
+
+        {% if agent.commitments_summary %}
+        <span class="detail-label">Commitments summary</span>
+        <span class="detail-value">{{ agent.commitments_summary }}</span>
+        {% endif %}
+        {% endif %}
       </div>
     </div>
   </section>

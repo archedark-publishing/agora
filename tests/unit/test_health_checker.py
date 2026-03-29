@@ -307,6 +307,10 @@ async def test_check_single_agent_verifies_agent_json_manifest(monkeypatch) -> N
                     "protocolVersion": "1.4.0",
                     "skills": [{"name": "health-check"}],
                     "identity": {"oatr_issuer_id": "issuer-123"},
+                    "commitments": {
+                        "summary": "Commits to deterministic outputs",
+                        "commitments": [{"id": "c1"}, {"id": "c2"}],
+                    },
                 },
                 request=request,
             )
@@ -335,6 +339,8 @@ async def test_check_single_agent_verifies_agent_json_manifest(monkeypatch) -> N
     assert healthy is True
     assert agent.agent_json_verified is True
     assert agent.oatr_issuer_id == "issuer-123"
+    assert agent.commitments_count == 2
+    assert agent.commitments_summary == "Commits to deterministic outputs"
 
 
 async def test_check_single_agent_fails_agent_json_domain_mismatch(monkeypatch) -> None:
@@ -376,6 +382,8 @@ async def test_check_single_agent_fails_agent_json_domain_mismatch(monkeypatch) 
 
     assert healthy is True
     assert agent.agent_json_verified is False
+    assert agent.commitments_count is None
+    assert agent.commitments_summary is None
 
 
 async def test_check_single_agent_fails_agent_json_did_mismatch(monkeypatch) -> None:
@@ -424,6 +432,8 @@ async def test_check_single_agent_fails_agent_json_did_mismatch(monkeypatch) -> 
 
     assert healthy is True
     assert agent.agent_json_verified is False
+    assert agent.commitments_count is None
+    assert agent.commitments_summary is None
 
 
 async def test_check_single_agent_skips_when_agent_json_missing(monkeypatch) -> None:
@@ -454,3 +464,5 @@ async def test_check_single_agent_skips_when_agent_json_missing(monkeypatch) -> 
 
     assert healthy is True
     assert agent.agent_json_verified is False
+    assert agent.commitments_count is None
+    assert agent.commitments_summary is None
