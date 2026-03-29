@@ -95,3 +95,68 @@ async def test_register_agent_supports_agent_card_url(client, monkeypatch) -> No
     assert agent.agent_card_url == "https://example.com"
     assert agent.description == "Fetched agent description"
     assert agent.name == "Override Name"
+
+
+async def test_register_agent_promotes_identity_did_from_agent_card_url(client, monkeypatch) -> None:
+    fetched_card = {
+        "protocolVersion": "0.3.0",
+        "name": "Identity DID Agent",
+        "description": "Fetched agent description",
+        "url": "https://identity.example/agents/fetched",
+        "version": "1.0.0",
+        "skills": [{"id": "echo", "name": "Echo"}],
+        "identity": {"did": "did:web:identity.example"},
+    }
+
+    async def _fake_fetch(url: str) -> dict[str, object]:
+        assert url == "https://identity.example"
+        return fetched_card
+
+    monkeypatch.setattr(main_module, "_fetch_agent_card_from_url", _fake_fetch)
+
+    register = await client.post(
+        "/api/v1/agents",
+        headers={"X-API-Key": "owner-key"},
+        json={"agent_card_url": "https://identity.example"},
+    )
+
+    assert register.status_code == 201
+    agent_id = register.json()["id"]
+
+    detail = await client.get(f"/api/v1/agents/{agent_id}")
+
+    assert detail.status_code == 200
+    assert detail.json()["did"] == "did:web:identity.example"
+
+
+async def test_register_agent_prefers_top_level_did_over_identity_did(client, monkeypatch) -> None:
+    fetched_card = {
+        "protocolVersion": "0.3.0",
+        "name": "Top-level DID Agent",
+        "description": "Fetched agent description",
+        "url": "https://top-level.example/agents/fetched",
+        "version": "1.0.0",
+        "skills": [{"id": "echo", "name": "Echo"}],
+        "did": "did:web:top-level.example",
+        "identity": {"did": "did:web:identity.example"},
+    }
+
+    async def _fake_fetch(url: str) -> dict[str, object]:
+        assert url == "https://top-level.example"
+        return fetched_card
+
+    monkeypatch.setattr(main_module, "_fetch_agent_card_from_url", _fake_fetch)
+
+    register = await client.post(
+        "/api/v1/agents",
+        headers={"X-API-Key": "owner-key"},
+        json={"agent_card_url": "https://top-level.example"},
+    )
+
+    assert register.status_code == 201
+    agent_id = register.json()["id"]
+
+    detail = await client.get(f"/api/v1/agents/{agent_id}")
+
+    assert detail.status_code == 200
+    assert detail.json()["did"] == "did:web:top-level.example"
