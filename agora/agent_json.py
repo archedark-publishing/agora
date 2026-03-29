@@ -20,6 +20,7 @@ class AgentJsonIdentity(BaseModel):
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
     did: str | None = None
+    oatr_issuer_id: str | None = Field(default=None, max_length=255)
 
 
 class AgentJsonManifest(BaseModel):
@@ -100,19 +101,19 @@ async def _fetch_json_document(
     return payload
 
 
-async def verify_agent_json_manifest(
+async def verify_agent_json_manifest_with_identity(
     *,
     agent_url: str,
     client: httpx.AsyncClient,
     allow_private_network_targets: bool,
-) -> bool:
+) -> tuple[bool, str | None]:
     """
     Verify agent.json v1.4 schema + domain binding (+ optional DID binding).
 
-    Notes:
-    - Missing or invalid `/.well-known/agent.json` is treated as not verified.
-    - If `identity.did` is present but DID document is unreachable, verification remains true
-      (soft signal) as long as schema + domain + DID string match pass.
+    Returns:
+        tuple[bool, str | None]:
+            - verified flag
+            - identity.oatr_issuer_id extracted from the manifest when available
     """
 
     manifest_url = build_agent_json_url(agent_url)
@@ -122,34 +123,36 @@ async def verify_agent_json_manifest(
         allow_private_network_targets=allow_private_network_targets,
     )
     if manifest_payload is None:
-        return False
+        return False, None
 
     try:
         manifest = AgentJsonManifest.model_validate(manifest_payload)
     except ValidationError:
-        return False
+        return False, None
+
+    oatr_issuer_id = manifest.identity.oatr_issuer_id if manifest.identity else None
 
     try:
         registered_origin = _normalized_origin(agent_url)
         manifest_origin = _normalized_origin(str(manifest.url))
     except ValueError:
-        return False
+        return False, oatr_issuer_id
 
     if manifest_origin != registered_origin:
-        return False
+        return False, oatr_issuer_id
 
     manifest_did = manifest.identity.did if manifest.identity else None
     if not manifest_did:
-        return True
+        return True, oatr_issuer_id
 
     try:
         expected_did = _expected_did_web_id(agent_url)
         did_document_url = f"https://{urlsplit(agent_url).hostname}{_DID_DOCUMENT_PATH}"
     except ValueError:
-        return False
+        return False, oatr_issuer_id
 
     if manifest_did != expected_did:
-        return False
+        return False, oatr_issuer_id
 
     did_document = await _fetch_json_document(
         did_document_url,
@@ -158,6 +161,22 @@ async def verify_agent_json_manifest(
     )
     if did_document is None:
         # Soft signal: keep manifest verified if DID endpoint is not yet reachable.
-        return True
+        return True, oatr_issuer_id
 
-    return did_document.get("id") == expected_did
+    return did_document.get("id") == expected_did, oatr_issuer_id
+
+
+async def verify_agent_json_manifest(
+    *,
+    agent_url: str,
+    client: httpx.AsyncClient,
+    allow_private_network_targets: bool,
+) -> bool:
+    """Backward-compatible bool-only wrapper for agent.json verification."""
+
+    verified, _oatr_issuer_id = await verify_agent_json_manifest_with_identity(
+        agent_url=agent_url,
+        client=client,
+        allow_private_network_targets=allow_private_network_targets,
+    )
+    return verified

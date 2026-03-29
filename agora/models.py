@@ -67,6 +67,7 @@ class Agent(Base):
         Index("idx_agents_did_verified", "did_verified"),
         Index("idx_agents_agent_json_verified", "agent_json_verified"),
         Index("idx_agents_protocol_version", "protocol_version"),
+        Index("idx_agents_oatr_issuer_id", "oatr_issuer_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -92,6 +93,7 @@ class Agent(Base):
     agent_card_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     econ_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     did: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    oatr_issuer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     did_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

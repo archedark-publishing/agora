@@ -189,3 +189,21 @@ def test_indexed_did_prefers_top_level_did() -> None:
     )
 
     assert did == "did:web:top-level.example"
+
+
+def test_indexed_oatr_issuer_id_from_identity() -> None:
+    issuer_id = main_module._indexed_oatr_issuer_id_from_agent_data(
+        {
+            "identity": {
+                "oatr_issuer_id": "issuer-123",
+            }
+        }
+    )
+
+    assert issuer_id == "issuer-123"
+
+
+def test_indexed_oatr_issuer_id_missing_identity() -> None:
+    issuer_id = main_module._indexed_oatr_issuer_id_from_agent_data({})
+
+    assert issuer_id is None

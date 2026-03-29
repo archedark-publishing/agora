@@ -1149,6 +1149,7 @@ async def search_page(
         operator_verified=None,
         has_protocol_version=None,
         protocol_version=None,
+        oatr_issuer_id=None,
         limit=limit,
         offset=offset,
     )
@@ -1815,6 +1816,7 @@ async def _prepare_preflight_schema_context(
 
     try:
         did = _indexed_did_from_agent_data(payload_for_validation, explicit_did=explicit_did)
+        _indexed_oatr_issuer_id_from_agent_data(payload_for_validation)
     except HTTPException as exc:
         return _preflight_check_result(
             status_value="fail",
@@ -2206,6 +2208,20 @@ def _indexed_did_from_agent_data(agent_data: dict[str, Any], *, explicit_did: st
         return _normalize_optional_did_field(identity.get("did"))
 
     return None
+
+
+def _indexed_oatr_issuer_id_from_agent_data(agent_data: dict[str, Any]) -> str | None:
+    """Resolve the OATR issuer ID to index from identity.oatr_issuer_id."""
+
+    identity = agent_data.get("identity")
+    if not isinstance(identity, dict):
+        return None
+
+    return _normalize_optional_string_field(
+        field_name="identity.oatr_issuer_id",
+        value=identity.get("oatr_issuer_id"),
+        max_length=255,
+    )
 
 
 def _did_web_document_url(did: str) -> str:
@@ -2945,6 +2961,7 @@ async def register_agent(
             sanitized_payload[key] = value
 
     did = _indexed_did_from_agent_data(sanitized_payload, explicit_did=explicit_did)
+    oatr_issuer_id = _indexed_oatr_issuer_id_from_agent_data(sanitized_payload)
 
     sanitized_payload.pop("agent_card_url", None)
     sanitized_payload.pop("econ_id", None)
@@ -3055,6 +3072,7 @@ async def register_agent(
         agent_card_url=agent_card_url,
         econ_id=econ_id,
         did=did,
+        oatr_issuer_id=oatr_issuer_id,
         did_verified=False,
         entity_verification_url=entity_verification_url,
         commitments_url=commitments_url,
@@ -3518,6 +3536,10 @@ async def search_agents(
         default=None,
         description="Exact protocol version match.",
     ),
+    oatr_issuer_id: str | None = Query(
+        default=None,
+        description="Exact OATR issuer ID match from identity.oatr_issuer_id.",
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -3540,6 +3562,7 @@ async def search_agents(
         operator_verified=operator_verified,
         has_protocol_version=has_protocol_version,
         protocol_version=protocol_version,
+        oatr_issuer_id=oatr_issuer_id,
         limit=limit,
         offset=offset,
     )
@@ -3570,6 +3593,7 @@ async def get_agent_detail(
         "protocol_version": agent.protocol_version,
         "econ_id": agent.econ_id,
         "did": agent.did,
+        "oatr_issuer_id": agent.oatr_issuer_id,
         "did_verified": agent.did_verified,
         "agent_json_verified": agent.agent_json_verified,
         "entity_verification_url": agent.entity_verification_url,
@@ -4040,6 +4064,7 @@ async def update_agent(
         max_length=255,
     )
     did = _indexed_did_from_agent_data(sanitized_payload)
+    oatr_issuer_id = _indexed_oatr_issuer_id_from_agent_data(sanitized_payload)
     entity_verification_url = _normalize_optional_url_field(
         field_name="entity_verification_url",
         value=sanitized_payload.get("entity_verification_url"),
@@ -4162,6 +4187,7 @@ async def update_agent(
     agent.output_modes = validated.output_modes
     agent.econ_id = econ_id
     agent.did = did
+    agent.oatr_issuer_id = oatr_issuer_id
     agent.did_verified = did_verified
     agent.entity_verification_url = entity_verification_url
     agent.commitments_url = commitments_url
@@ -4249,6 +4275,10 @@ async def list_agents(
     protocol_version: str | None = Query(
         default=None,
         description="Exact protocol version match.",
+    ),
+    oatr_issuer_id: str | None = Query(
+        default=None,
+        description="Exact OATR issuer ID match from identity.oatr_issuer_id.",
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -4344,6 +4374,15 @@ async def list_agents(
             )
         filters.append(Agent.protocol_version == normalized_protocol_version)
 
+    if oatr_issuer_id is not None:
+        normalized_oatr_issuer_id = oatr_issuer_id.strip()
+        if not normalized_oatr_issuer_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="oatr_issuer_id cannot be empty",
+            )
+        filters.append(Agent.oatr_issuer_id == normalized_oatr_issuer_id)
+
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
     if effective_stale is True:
@@ -4403,6 +4442,7 @@ async def list_agents(
                 "protocol_version": agent.protocol_version,
                 "econ_id": agent.econ_id,
                 "did": agent.did,
+                "oatr_issuer_id": agent.oatr_issuer_id,
                 "did_verified": agent.did_verified,
                 "agent_json_verified": agent.agent_json_verified,
                 "entity_verification_url": agent.entity_verification_url,
