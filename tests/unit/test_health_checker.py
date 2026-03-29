@@ -306,6 +306,7 @@ async def test_check_single_agent_verifies_agent_json_manifest(monkeypatch) -> N
                     "url": "https://example.com/agents/demo",
                     "protocolVersion": "1.4.0",
                     "skills": [{"name": "health-check"}],
+                    "identity": {"oatr_issuer_id": "issuer-123"},
                 },
                 request=request,
             )
@@ -333,6 +334,7 @@ async def test_check_single_agent_verifies_agent_json_manifest(monkeypatch) -> N
 
     assert healthy is True
     assert agent.agent_json_verified is True
+    assert agent.oatr_issuer_id == "issuer-123"
 
 
 async def test_check_single_agent_fails_agent_json_domain_mismatch(monkeypatch) -> None:

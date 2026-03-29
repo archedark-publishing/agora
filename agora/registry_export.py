@@ -39,6 +39,7 @@ async def build_registry_snapshot(
                 "stale_days": stale_days,
                 "protocol_version": agent.protocol_version,
                 "econ_id": agent.econ_id,
+                "oatr_issuer_id": agent.oatr_issuer_id,
                 "erc8004_verified": agent.erc8004_verified,
                 "agent_json_verified": agent.agent_json_verified,
                 "operator": agent.operator,
