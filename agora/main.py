@@ -1775,7 +1775,7 @@ async def _prepare_preflight_schema_context(
 
     try:
         agent_card_url = registration_request.agent_card_url
-        did = _normalize_optional_did_field(registration_request.did)
+        explicit_did = _normalize_optional_did_field(registration_request.did)
         commitments_url = _normalize_optional_url_field(
             field_name="commitments_url",
             value=registration_request.commitments_url,
@@ -1812,6 +1812,14 @@ async def _prepare_preflight_schema_context(
             if key == "description" and payload_for_validation.get("description"):
                 continue
             payload_for_validation[key] = value
+
+    try:
+        did = _indexed_did_from_agent_data(payload_for_validation, explicit_did=explicit_did)
+    except HTTPException as exc:
+        return _preflight_check_result(
+            status_value="fail",
+            detail=_summarize_http_exception_detail(exc.detail),
+        ), None
 
     payload_for_validation.pop("agent_card_url", None)
     payload_for_validation.pop("econ_id", None)
@@ -2181,6 +2189,23 @@ def _normalize_optional_did_field(value: Any) -> str | None:
             },
         )
     return did
+
+
+def _indexed_did_from_agent_data(agent_data: dict[str, Any], *, explicit_did: str | None = None) -> str | None:
+    """Resolve the DID to index, promoting identity.did when top-level did is absent."""
+
+    if explicit_did is not None:
+        return explicit_did
+
+    top_level_did = _normalize_optional_did_field(agent_data.get("did"))
+    if top_level_did is not None:
+        return top_level_did
+
+    identity = agent_data.get("identity")
+    if isinstance(identity, dict):
+        return _normalize_optional_did_field(identity.get("did"))
+
+    return None
 
 
 def _did_web_document_url(did: str) -> str:
@@ -2892,7 +2917,7 @@ async def register_agent(
         value=registration_request.econ_id,
         max_length=255,
     )
-    did = _normalize_optional_did_field(registration_request.did)
+    explicit_did = _normalize_optional_did_field(registration_request.did)
     entity_verification_url = _normalize_optional_url_field(
         field_name="entity_verification_url",
         value=registration_request.entity_verification_url,
@@ -2918,6 +2943,8 @@ async def register_agent(
             if key == "description" and sanitized_payload.get("description"):
                 continue
             sanitized_payload[key] = value
+
+    did = _indexed_did_from_agent_data(sanitized_payload, explicit_did=explicit_did)
 
     sanitized_payload.pop("agent_card_url", None)
     sanitized_payload.pop("econ_id", None)
@@ -4012,7 +4039,7 @@ async def update_agent(
         value=sanitized_payload.get("econ_id"),
         max_length=255,
     )
-    did = _normalize_optional_did_field(sanitized_payload.get("did"))
+    did = _indexed_did_from_agent_data(sanitized_payload)
     entity_verification_url = _normalize_optional_url_field(
         field_name="entity_verification_url",
         value=sanitized_payload.get("entity_verification_url"),

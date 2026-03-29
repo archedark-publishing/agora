@@ -164,3 +164,28 @@ async def test_preflight_rejects_malformed_json() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Malformed JSON body"
+
+
+def test_indexed_did_falls_back_to_identity_did() -> None:
+    did = main_module._indexed_did_from_agent_data(
+        {
+            "identity": {
+                "did": "did:web:identity.example",
+            }
+        }
+    )
+
+    assert did == "did:web:identity.example"
+
+
+def test_indexed_did_prefers_top_level_did() -> None:
+    did = main_module._indexed_did_from_agent_data(
+        {
+            "did": "did:web:top-level.example",
+            "identity": {
+                "did": "did:web:identity.example",
+            },
+        }
+    )
+
+    assert did == "did:web:top-level.example"
