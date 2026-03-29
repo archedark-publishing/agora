@@ -1,7 +1,7 @@
 """add inline commitments metadata columns to agents
 
-Revision ID: 20260329_0018
-Revises: 20260327_0017
+Revision ID: 20260329_0019
+Revises: 20260329_0018
 Create Date: 2026-03-29 17:52:00.000000
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "20260329_0018"
-down_revision = "20260327_0017"
+revision = "20260329_0019"
+down_revision = "20260329_0018"
 branch_labels = None
 depends_on = None
 
