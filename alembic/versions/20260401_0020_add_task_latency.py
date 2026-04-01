@@ -1,7 +1,7 @@
 """add task_latency column to agents
 
-Revision ID: 20260401_0018
-Revises: 20260327_0017
+Revision ID: 20260401_0020
+Revises: 20260329_0019
 Create Date: 2026-04-01 11:20:00.000000
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "20260401_0018"
-down_revision = "20260327_0017"
+revision = "20260401_0020"
+down_revision = "20260329_0019"
 branch_labels = None
 depends_on = None
 
