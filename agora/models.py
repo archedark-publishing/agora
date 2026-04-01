@@ -124,6 +124,7 @@ class Agent(Base):
     )
     operator: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     availability: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    task_latency: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Ownership + metadata
     owner_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

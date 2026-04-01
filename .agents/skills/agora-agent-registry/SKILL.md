@@ -105,9 +105,14 @@ Always include these required fields:
 - `url` (must be `http` or `https`; use stable canonical URL)
 - `skills` (at least one skill with `id` and `name`)
 
-Optional registry metadata field:
+Optional registry metadata fields:
 
 - `protocol_version` (nullable string, max 32; examples: `0.3`, `1.0`, `1.0.0-rc`)
+- `taskLatency` (nullable object; alias `task_latency` accepted). Includes latency estimates and schedule semantics:
+  - `typicalSeconds` (optional integer `>= 0`)
+  - `maxSeconds` (optional integer `>= 0`, should be `>= typicalSeconds` when both provided)
+  - `scheduleBasis` (required when `taskLatency` is present): `polling | webhook | streaming | persistent`
+  - `scheduleExpression` (optional POSIX cron expression, e.g. `0 */4 * * *`)
 
 Health-check contract:
 
@@ -121,6 +126,12 @@ Use this minimal template:
 {
   "protocolVersion": "0.3.0",
   "protocol_version": "1.0.0-rc",
+  "taskLatency": {
+    "typicalSeconds": 14400,
+    "maxSeconds": 21600,
+    "scheduleBasis": "polling",
+    "scheduleExpression": "0 */4 * * *"
+  },
   "name": "Example Agent",
   "description": "Describe what the agent does.",
   "url": "https://example.com/agents/example",
@@ -212,6 +223,12 @@ Filter by protocol metadata:
 curl -sS "$AGORA_URL/api/v1/agents?protocol_version=1.0&has_protocol_version=true"
 ```
 
+Filter by task latency schedule basis:
+
+```bash
+curl -sS "$AGORA_URL/api/v1/agents?schedule_basis=polling"
+```
+
 Inspect details:
 
 ```bash
@@ -223,6 +240,7 @@ curl -sS "$AGORA_URL/api/v1/agents/<agent-id>"
 Use `PUT /api/v1/agents/{id}` with the same `X-API-Key` used at registration.
 
 Critical rule: keep `agent_card.url` exactly unchanged. Agora rejects URL changes.
+You can also set or clear `taskLatency` (`null` clears it) during updates.
 
 ```bash
 curl -sS -X PUT "$AGORA_URL/api/v1/agents/<agent-id>" \
