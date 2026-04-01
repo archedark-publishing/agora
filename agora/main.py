@@ -271,6 +271,39 @@ class AvailabilityPayload(BaseModel):
         return self
 
 
+class TaskLatencyPayload(BaseModel):
+    model_config = {"extra": "forbid", "populate_by_name": True}
+
+    typical_seconds: int | None = Field(default=None, ge=0, alias="typicalSeconds")
+    max_seconds: int | None = Field(default=None, ge=0, alias="maxSeconds")
+    schedule_basis: Literal["polling", "webhook", "streaming", "persistent"] = Field(
+        alias="scheduleBasis"
+    )
+    schedule_expression: str | None = Field(default=None, max_length=255, alias="scheduleExpression")
+
+    @field_validator("schedule_expression")
+    @classmethod
+    def _validate_schedule_expression(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("scheduleExpression cannot be empty")
+        if not _is_valid_posix_cron_expression(normalized):
+            raise ValueError("scheduleExpression must be a valid POSIX cron expression")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_latency_bounds(self) -> "TaskLatencyPayload":
+        if (
+            self.typical_seconds is not None
+            and self.max_seconds is not None
+            and self.max_seconds < self.typical_seconds
+        ):
+            raise ValueError("maxSeconds must be greater than or equal to typicalSeconds")
+        return self
+
+
 class AgentHeartbeatRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -1701,6 +1734,57 @@ def _parse_availability_payload(raw: Any) -> dict[str, Any] | None:
     return serialized
 
 
+def _extract_task_latency_raw(payload: dict[str, Any]) -> tuple[bool, Any]:
+    has_camel = "taskLatency" in payload
+    has_snake = "task_latency" in payload
+    if not has_camel and not has_snake:
+        return False, None
+
+    if has_camel and has_snake:
+        camel_value = payload.get("taskLatency")
+        snake_value = payload.get("task_latency")
+        if camel_value != snake_value:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Invalid task latency metadata",
+                    "errors": [
+                        {
+                            "field": "taskLatency",
+                            "message": "taskLatency and task_latency must match when both are provided",
+                            "type": "value_error.conflict",
+                        }
+                    ],
+                },
+            )
+        return True, camel_value
+
+    if has_camel:
+        return True, payload.get("taskLatency")
+    return True, payload.get("task_latency")
+
+
+def _parse_task_latency_payload(raw: Any) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    try:
+        parsed = TaskLatencyPayload.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_validation_error_to_detail(
+                exc,
+                message="Invalid task latency metadata",
+                field_prefix="taskLatency",
+            ),
+        ) from exc
+
+    serialized = parsed.model_dump(by_alias=True, mode="json", exclude_none=True)
+    if not serialized:
+        return None
+    return serialized
+
+
 def _preflight_check_result(
     *,
     status_value: Literal["pass", "fail", "skip"],
@@ -1790,6 +1874,9 @@ async def _prepare_preflight_schema_context(
             max_length=2048,
         )
         agent_trust_url = _extract_preflight_oatr_url(sanitized_payload)
+        task_latency_present, task_latency_raw = _extract_task_latency_raw(sanitized_payload)
+        if task_latency_present:
+            _parse_task_latency_payload(task_latency_raw)
     except HTTPException as exc:
         return _preflight_check_result(
             status_value="fail",
@@ -1840,6 +1927,8 @@ async def _prepare_preflight_schema_context(
     payload_for_validation.pop("commitment_verified", None)
     payload_for_validation.pop("protocol_version", None)
     payload_for_validation.pop("availability", None)
+    payload_for_validation.pop("taskLatency", None)
+    payload_for_validation.pop("task_latency", None)
     payload_for_validation.pop("agent_trust_url", None)
     payload_for_validation.pop("oatr_url", None)
     payload_for_validation.pop("agent_trust", None)
@@ -2957,6 +3046,8 @@ async def register_agent(
         max_length=32,
     )
     availability = _parse_availability_payload(sanitized_payload.get("availability"))
+    task_latency_present, task_latency_raw = _extract_task_latency_raw(sanitized_payload)
+    task_latency = _parse_task_latency_payload(task_latency_raw) if task_latency_present else None
 
     if agent_card_url:
         fetched_agent_card = await _fetch_agent_card_from_url(agent_card_url)
@@ -2980,6 +3071,8 @@ async def register_agent(
     sanitized_payload.pop("commitment_verified", None)
     sanitized_payload.pop("protocol_version", None)
     sanitized_payload.pop("availability", None)
+    sanitized_payload.pop("taskLatency", None)
+    sanitized_payload.pop("task_latency", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -3087,6 +3180,7 @@ async def register_agent(
         erc8004_verified=erc8004_verified,
         operator=normalized_operator,
         availability=availability,
+        task_latency=task_latency,
         owner_key_hash=hash_api_key(api_key),
     )
     session.add(agent)
@@ -3547,6 +3641,10 @@ async def search_agents(
         default=None,
         description="Exact OATR issuer ID match from identity.oatr_issuer_id.",
     ),
+    schedule_basis: Literal["polling", "webhook", "streaming", "persistent"] | None = Query(
+        default=None,
+        description="Filter by taskLatency.scheduleBasis.",
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -3570,6 +3668,7 @@ async def search_agents(
         has_protocol_version=has_protocol_version,
         protocol_version=protocol_version,
         oatr_issuer_id=oatr_issuer_id,
+        schedule_basis=schedule_basis,
         limit=limit,
         offset=offset,
     )
@@ -3611,6 +3710,7 @@ async def get_agent_detail(
         "erc8004_verified": agent.erc8004_verified,
         "operator": agent.operator,
         "availability": agent.availability,
+        "taskLatency": agent.task_latency,
     }
 
 
@@ -4092,6 +4192,12 @@ async def update_agent(
     availability = agent.availability
     if "availability" in sanitized_payload:
         availability = _parse_availability_payload(sanitized_payload.get("availability"))
+
+    task_latency = agent.task_latency
+    task_latency_present, task_latency_raw = _extract_task_latency_raw(sanitized_payload)
+    if task_latency_present:
+        task_latency = _parse_task_latency_payload(task_latency_raw)
+
     sanitized_payload.pop("econ_id", None)
     sanitized_payload.pop("did", None)
     sanitized_payload.pop("did_verified", None)
@@ -4101,6 +4207,8 @@ async def update_agent(
     sanitized_payload.pop("commitment_verified", None)
     sanitized_payload.pop("protocol_version", None)
     sanitized_payload.pop("availability", None)
+    sanitized_payload.pop("taskLatency", None)
+    sanitized_payload.pop("task_latency", None)
 
     try:
         validated = validate_agent_card(sanitized_payload)
@@ -4203,6 +4311,7 @@ async def update_agent(
     agent.commitment_verified = commitment_verified
     agent.operator = normalized_operator
     agent.availability = availability
+    agent.task_latency = task_latency
 
     if normalized_operator is None or _operator_claim_identity(normalized_operator) != previous_operator_identity:
         _clear_operator_challenge(agent)
@@ -4288,6 +4397,10 @@ async def list_agents(
     oatr_issuer_id: str | None = Query(
         default=None,
         description="Exact OATR issuer ID match from identity.oatr_issuer_id.",
+    ),
+    schedule_basis: Literal["polling", "webhook", "streaming", "persistent"] | None = Query(
+        default=None,
+        description="Filter by taskLatency.scheduleBasis.",
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -4392,6 +4505,9 @@ async def list_agents(
             )
         filters.append(Agent.oatr_issuer_id == normalized_oatr_issuer_id)
 
+    if schedule_basis is not None:
+        filters.append(Agent.task_latency["scheduleBasis"].astext == schedule_basis)
+
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
     if effective_stale is True:
@@ -4463,6 +4579,7 @@ async def list_agents(
                 "operator": agent.operator,
                 "operator_verified": _operator_claim_is_verified(agent.operator),
                 "availability": agent.availability,
+                "taskLatency": agent.task_latency,
             }
         )
 
