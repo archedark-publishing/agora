@@ -1850,6 +1850,20 @@ def _extract_preflight_oatr_url(payload: dict[str, Any]) -> str | None:
     return None
 
 
+def _merge_agent_card_payload(
+    payload: dict[str, Any],
+    fetched_agent_card: dict[str, Any],
+) -> dict[str, Any]:
+    merged_payload = dict(payload)
+    for key, value in fetched_agent_card.items():
+        if key == "name" and merged_payload.get("name"):
+            continue
+        if key == "description" and merged_payload.get("description"):
+            continue
+        merged_payload[key] = value
+    return merged_payload
+
+
 async def _prepare_preflight_schema_context(
     sanitized_payload: dict[str, Any],
 ) -> tuple[dict[str, str | None], dict[str, Any] | None]:
@@ -1901,12 +1915,7 @@ async def _prepare_preflight_schema_context(
                 detail=_summarize_http_exception_detail(exc.detail),
             ), None
 
-        for key, value in fetched_agent_card.items():
-            if key == "name" and payload_for_validation.get("name"):
-                continue
-            if key == "description" and payload_for_validation.get("description"):
-                continue
-            payload_for_validation[key] = value
+        payload_for_validation = _merge_agent_card_payload(payload_for_validation, fetched_agent_card)
 
     try:
         did = _indexed_did_from_agent_data(payload_for_validation, explicit_did=explicit_did)
@@ -3049,33 +3058,29 @@ async def register_agent(
     task_latency_present, task_latency_raw = _extract_task_latency_raw(sanitized_payload)
     task_latency = _parse_task_latency_payload(task_latency_raw) if task_latency_present else None
 
+    payload_for_validation = dict(sanitized_payload)
     if agent_card_url:
         fetched_agent_card = await _fetch_agent_card_from_url(agent_card_url)
-        for key, value in fetched_agent_card.items():
-            if key == "name" and sanitized_payload.get("name"):
-                continue
-            if key == "description" and sanitized_payload.get("description"):
-                continue
-            sanitized_payload[key] = value
+        payload_for_validation = _merge_agent_card_payload(payload_for_validation, fetched_agent_card)
 
-    did = _indexed_did_from_agent_data(sanitized_payload, explicit_did=explicit_did)
-    oatr_issuer_id = _indexed_oatr_issuer_id_from_agent_data(sanitized_payload)
+    did = _indexed_did_from_agent_data(payload_for_validation, explicit_did=explicit_did)
+    oatr_issuer_id = _indexed_oatr_issuer_id_from_agent_data(payload_for_validation)
 
-    sanitized_payload.pop("agent_card_url", None)
-    sanitized_payload.pop("econ_id", None)
-    sanitized_payload.pop("did", None)
-    sanitized_payload.pop("did_verified", None)
-    sanitized_payload.pop("agent_json_verified", None)
-    sanitized_payload.pop("entity_verification_url", None)
-    sanitized_payload.pop("commitments_url", None)
-    sanitized_payload.pop("commitment_verified", None)
-    sanitized_payload.pop("protocol_version", None)
-    sanitized_payload.pop("availability", None)
-    sanitized_payload.pop("taskLatency", None)
-    sanitized_payload.pop("task_latency", None)
+    payload_for_validation.pop("agent_card_url", None)
+    payload_for_validation.pop("econ_id", None)
+    payload_for_validation.pop("did", None)
+    payload_for_validation.pop("did_verified", None)
+    payload_for_validation.pop("agent_json_verified", None)
+    payload_for_validation.pop("entity_verification_url", None)
+    payload_for_validation.pop("commitments_url", None)
+    payload_for_validation.pop("commitment_verified", None)
+    payload_for_validation.pop("protocol_version", None)
+    payload_for_validation.pop("availability", None)
+    payload_for_validation.pop("taskLatency", None)
+    payload_for_validation.pop("task_latency", None)
 
     try:
-        validated = validate_agent_card(sanitized_payload)
+        validated = validate_agent_card(payload_for_validation)
     except AgentCardValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
