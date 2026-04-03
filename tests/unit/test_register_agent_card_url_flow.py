@@ -177,3 +177,36 @@ async def test_register_agent_prefers_top_level_did_over_identity_did_with_fake_
 
     assert detail.status_code == 200
     assert detail.json()["did"] == "did:web:top-level.example"
+
+
+async def test_register_agent_with_explicit_url_and_agent_card_url_still_succeeds(
+    client_with_fake_db,
+    monkeypatch,
+) -> None:
+    fetched_card = {
+        "protocolVersion": "0.3.0",
+        "name": "Fetched Agent Name",
+        "description": "Fetched agent description",
+        "url": "https://both.example/agents/fetched",
+        "version": "1.0.0",
+        "skills": [{"id": "echo", "name": "Echo"}],
+    }
+
+    async def _fake_fetch(url: str) -> dict[str, object]:
+        assert url == "https://both.example"
+        return fetched_card
+
+    monkeypatch.setattr(main_module, "_fetch_agent_card_from_url", _fake_fetch)
+
+    response = await client_with_fake_db.post(
+        "/api/v1/agents",
+        headers={"X-API-Key": "owner-key"},
+        json={
+            "agent_card_url": "https://both.example",
+            "url": "https://both.example/agents/fetched",
+            "name": "Override Name",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["url"] == "https://both.example/agents/fetched"
