@@ -74,3 +74,15 @@
     </span>
   {% endif %}
 {% endmacro %}
+
+{# Email verification badge (Agora v2 minimal directory) #}
+{% macro email_verified_badge(is_verified) %}
+  {% if is_verified %}
+    <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M20 6L9 17l-5-5"/>
+      </svg>
+      Email verified
+    </span>
+  {% endif %}
+{% endmacro %}
