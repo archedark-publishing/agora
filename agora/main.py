@@ -1,12 +1,18 @@
 """FastAPI entrypoint for Agora."""
 
 import asyncio
+import base64
+import binascii
+import hashlib
 import hmac
+import html
 import ipaddress
 import json
 import logging
 import math
 import re
+import secrets
+import time
 from datetime import date, datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
@@ -98,6 +104,7 @@ if settings.environment.lower() not in {"development", "test"} and not rate_limi
 recovery_logger = logging.getLogger("agora.recovery")
 health_logger = logging.getLogger("agora.health")
 registry_logger = logging.getLogger("agora.registry")
+email_logger = logging.getLogger("agora.email")
 reputation_logger = logging.getLogger("agora.reputation")
 request_logger = logging.getLogger("agora.request")
 query_tracker = QueryTracker()
@@ -3231,13 +3238,162 @@ async def register_agent(
 # The registry is a directory first: who is this agent, what does it do, how
 # do I contact it, how quickly will it respond. Registration needs only a
 # name, a description, an email address, and a self-reported response SLA.
-# Email ownership is proven by publishing a challenge token at a well-known
-# URL on the email's domain (no outbound email infrastructure required).
+# Email ownership is proven by clicking a signed verification link sent to
+# the listing's email address (outbound mail via Resend).
 # ---------------------------------------------------------------------------
 
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$")
-_EMAIL_CHALLENGE_TTL = timedelta(days=7)
-_EMAIL_CHALLENGE_WELL_KNOWN_PATH = "/.well-known/agora-email-challenge.txt"
+
+_EPHEMERAL_EMAIL_SIGNING_KEY: bytes | None = None
+
+
+def _email_signing_key() -> bytes:
+    """HMAC key for signing email verification tokens.
+
+    Uses the configured ``email_signing_secret``; falls back to an ephemeral
+    process-local key (verification links die on restart) with a loud warning
+    when unset.
+    """
+    configured = settings.email_signing_secret
+    if configured:
+        return configured.encode("utf-8")
+    global _EPHEMERAL_EMAIL_SIGNING_KEY
+    if _EPHEMERAL_EMAIL_SIGNING_KEY is None:
+        _EPHEMERAL_EMAIL_SIGNING_KEY = secrets.token_bytes(32)
+        email_logger.warning(
+            "email_signing_secret is not set; using an ephemeral key. "
+            "Verification links will not survive restarts. "
+            "Set email_signing_secret in production."
+        )
+    return _EPHEMERAL_EMAIL_SIGNING_KEY
+
+
+def _issue_email_verification_token(agent_id: UUID, email: str) -> str:
+    """Issue a signed, expiring token for the email verification link."""
+    expires_at = int(time.time()) + settings.email_verification_ttl_hours * 3600
+    payload = json.dumps(
+        {"aid": str(agent_id), "em": email, "exp": expires_at},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    signature = hmac.new(_email_signing_key(), payload, hashlib.sha256).digest()
+
+    def _b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    return f"{_b64(payload)}.{_b64(signature)}"
+
+
+def _parse_email_verification_token(token: str) -> tuple[UUID, str] | None:
+    """Return ``(agent_id, email)`` for a valid token, else ``None``."""
+    try:
+        payload_b64, signature_b64 = token.split(".", 1)
+        payload = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
+        signature = base64.urlsafe_b64decode(
+            signature_b64 + "=" * (-len(signature_b64) % 4)
+        )
+    except (ValueError, binascii.Error):
+        return None
+    expected = hmac.new(_email_signing_key(), payload, hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        data = json.loads(payload.decode("utf-8"))
+        if int(data["exp"]) < int(time.time()):
+            return None
+        return UUID(str(data["aid"])), str(data["em"])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def _email_verification_url(agent_id: UUID, email: str) -> str:
+    token = _issue_email_verification_token(agent_id, email)
+    base = settings.email_verify_base_url.rstrip("/")
+    return f"{base}/verify-email?token={token}"
+
+
+def _verification_email_text(*, agent_name: str, email: str, verify_url: str) -> str:
+    ttl_hours = settings.email_verification_ttl_hours
+    return dedent(
+        f"""\
+        Hello,
+
+        Someone registered the agent "{agent_name}" in the Agora directory
+        (https://the-agora.dev) with this email address ({email}).
+
+        To confirm the listing is yours and earn the verified badge, open this link:
+
+        {verify_url}
+
+        The link expires in {ttl_hours} hours. If you didn't request this,
+        just ignore this email — the listing stays unverified.
+
+        — Agora
+        """
+    ).strip()
+
+
+async def _send_verification_email(
+    *, to_email: str, agent_name: str, verify_url: str
+) -> bool:
+    """Send the verification email via Resend.
+
+    Returns True when the provider accepted the message. When no API key is
+    configured (local dev), logs the link instead and returns False so the
+    caller can report honestly.
+    """
+    api_key = settings.resend_api_key
+    if not api_key:
+        email_logger.warning(
+            "resend_api_key is not set; not sending verification email to %s. "
+            "Verification link: %s",
+            to_email,
+            verify_url,
+        )
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10)) as client:
+            response = await client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "from": settings.email_from,
+                    "to": [to_email],
+                    "subject": f"Verify your Agora listing: {agent_name}",
+                    "text": _verification_email_text(
+                        agent_name=agent_name, email=to_email, verify_url=verify_url
+                    ),
+                },
+            )
+    except (httpx.HTTPError, OSError) as exc:
+        email_logger.error("Verification email to %s failed: %s", to_email, exc)
+        return False
+    if response.status_code >= 400:
+        email_logger.error(
+            "Verification email to %s rejected: HTTP %s %.300s",
+            to_email,
+            response.status_code,
+            response.text,
+        )
+        return False
+    return True
+
+
+def _verify_email_page(*, heading: str, body_html: str, ok: bool) -> str:
+    """Small standalone confirmation page for the verification link."""
+    color = "#1a7f37" if ok else "#b42318"
+    return dedent(
+        f"""\
+        <!doctype html>
+        <html lang="en">
+        <head><meta charset="utf-8"><title>{html.escape(heading)} — Agora</title></head>
+        <body style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem;">
+          <h1 style="color: {color};">{html.escape(heading)}</h1>
+          <p>{body_html}</p>
+          <p><a href="/">Back to the Agora directory</a></p>
+        </body>
+        </html>
+        """
+    ).strip()
 
 
 def _normalize_email_field(*, field_name: str, value: Any) -> str:
@@ -3351,8 +3507,11 @@ async def register_agent_minimal(
     Required: name, description, email. Optional: response_sla,
     capabilities (list of strings), url. The X-API-Key header is a
     self-chosen owner secret (stored as a hash) used for later updates,
-    heartbeats, and email verification — same ownership model as the
-    full A2A registration.
+    heartbeats, and re-sending the verification email — same ownership model
+    as the full A2A registration.
+
+    A signed verification link is emailed to the listing address; opening it
+    marks the listing verified.
     """
     await _enforce_registration_rate_limits(request, api_key)
 
@@ -3420,9 +3579,7 @@ async def register_agent_minimal(
                 detail="An agent with this URL is already registered",
             )
 
-    challenge = token_urlsafe(32)
     slug = await _unique_directory_slug(session, _slugify_name(name))
-    now_utc = datetime.now(tz=timezone.utc)
 
     minimal_card: dict[str, Any] = {
         "name": name,
@@ -3447,8 +3604,6 @@ async def register_agent_minimal(
         email=email,
         response_sla=response_sla,
         email_verified=False,
-        email_challenge=challenge,
-        email_challenge_expires_at=now_utc + _EMAIL_CHALLENGE_TTL,
         directory_slug=slug,
         owner_key_hash=hash_api_key(api_key),
     )
@@ -3463,47 +3618,116 @@ async def register_agent_minimal(
         ) from exc
 
     await session.refresh(agent)
-    email_domain = email.split("@", 1)[1]
+    verify_url = _email_verification_url(agent.id, email)
+    email_sent = await _send_verification_email(
+        to_email=email, agent_name=name, verify_url=verify_url
+    )
+    if email_sent:
+        message = (
+            f"Agent registered. A verification email was sent to {email} — "
+            "open the link inside to earn the verified badge."
+        )
+    else:
+        message = (
+            "Agent registered. The verification email could not be sent "
+            "(email delivery is not configured on this server). Once it is, "
+            f"POST to /api/v1/agents/{agent.id}/verify-email/resend "
+            "with your X-API-Key header to receive the link."
+        )
     return {
         "id": str(agent.id),
         "name": agent.name,
         "directory_slug": agent.directory_slug,
         "registered_at": agent.registered_at.isoformat(),
-        "message": "Agent registered. Verify email ownership to complete the listing.",
-        "email_challenge": challenge,
-        "email_challenge_expires_at": agent.email_challenge_expires_at.isoformat()
-        if agent.email_challenge_expires_at
-        else None,
-        "verification_instructions": (
-            f"Publish the challenge token as plain text at "
-            f"https://{email_domain}{_EMAIL_CHALLENGE_WELL_KNOWN_PATH} "
-            f"then POST to /api/v1/agents/{agent.id}/verify-email "
-            f"with your X-API-Key header."
-        ),
+        "email": email,
+        "email_verified": False,
+        "verification_email_sent": email_sent,
+        "message": message,
     }
 
 
-@app.post("/api/v1/agents/{agent_id}/verify-email", tags=["agents"])
-async def verify_agent_email(
+@app.get("/verify-email", tags=["agents"], include_in_schema=False)
+async def verify_email_link(
+    token: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Click-through endpoint for email verification links (opened in a browser).
+
+    The token is HMAC-signed and expiring; it binds the agent id to the
+    email address the link was sent to.
+    """
+
+    def _page(heading: str, body_html: str, ok: bool, status_code: int) -> HTMLResponse:
+        return HTMLResponse(
+            _verify_email_page(heading=heading, body_html=body_html, ok=ok),
+            status_code=status_code,
+        )
+
+    parsed = _parse_email_verification_token(token) if token else None
+    if parsed is None:
+        return _page(
+            heading="Link invalid or expired",
+            body_html=(
+                "This verification link is invalid or has expired. "
+                "Ask the listing owner to request a new one."
+            ),
+            ok=False,
+            status_code=400,
+        )
+    agent_id, token_email = parsed
+    agent = await session.get(Agent, agent_id)
+    if agent is None or not agent.email or agent.email.lower() != token_email.lower():
+        return _page(
+            heading="Link invalid or expired",
+            body_html="This verification link does not match any pending listing.",
+            ok=False,
+            status_code=400,
+        )
+    if agent.email_verified:
+        return _page(
+            heading="Already verified",
+            body_html=(
+                f"The listing for <strong>{html.escape(agent.name)}</strong> "
+                f"(&lt;{html.escape(agent.email)}&gt;) is already verified."
+            ),
+            ok=True,
+            status_code=200,
+        )
+    agent.email_verified = True
+    await session.commit()
+    return _page(
+        heading="Email verified",
+        body_html=(
+            f"The listing for <strong>{html.escape(agent.name)}</strong> "
+            f"(&lt;{html.escape(agent.email)}&gt;) is now verified. "
+            "Thanks for confirming you read mail here."
+        ),
+        ok=True,
+        status_code=200,
+    )
+
+
+@app.post("/api/v1/agents/{agent_id}/verify-email/resend", tags=["agents"])
+async def resend_verification_email(
     agent_id: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, Any]:
-    """Verify email ownership for a minimal directory listing.
+    """Re-send the verification email for a minimal listing.
 
-    The agent proves control of the email's domain by publishing the
-    challenge token (issued at registration) as plain text at
-    https://<domain>/.well-known/agora-email-challenge.txt. The directory
-    fetches it and compares. Requires the owner's X-API-Key.
+    Requires the owner's X-API-Key. Rate-limited per agent.
     """
+    await _enforce_rate_limit(
+        key=f"api:verify_email_resend:agent:{agent_id}",
+        limit=5,
+    )
     agent = await session.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
     if not verify_api_key(api_key, agent.owner_key_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     if agent.email_verified:
         return {
@@ -3512,70 +3736,25 @@ async def verify_agent_email(
             "email_verified": True,
             "message": "Email already verified",
         }
-
-    if not agent.email or not agent.email_challenge:
+    if not agent.email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No pending email challenge for this agent",
+            detail="No email address on this listing",
         )
-
-    now_utc = datetime.now(tz=timezone.utc)
-    if agent.email_challenge_expires_at and agent.email_challenge_expires_at < now_utc:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="Email challenge expired. Re-register to get a new challenge.",
-        )
-
-    domain = agent.email.split("@", 1)[1]
-    challenge_url = f"https://{domain}{_EMAIL_CHALLENGE_WELL_KNOWN_PATH}"
-    try:
-        safe_target = assert_url_safe_for_outbound(
-            challenge_url,
-            allow_private=settings.allow_private_network_targets,
-        )
-    except URLSafetyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Cannot verify email domain: {exc}",
-        ) from exc
-
-    published_token: str | None = None
-    try:
-        async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(10), follow_redirects=True
-            ) as client:
-                response = await client.get(challenge_url)
-                if response.status_code == 200 and response.text:
-                    published_token = response.text.strip().split()[0]
-    except (httpx.HTTPError, OSError):
-        published_token = None
-
-    if published_token is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Challenge token not found at {challenge_url}. "
-                "Publish the token as plain text there, then retry."
-            ),
-        )
-
-    if not hmac.compare_digest(published_token, agent.email_challenge):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Published token does not match the challenge",
-        )
-
-    agent.email_verified = True
-    agent.email_challenge = None
-    agent.email_challenge_expires_at = None
-    await session.commit()
-    await session.refresh(agent)
+    verify_url = _email_verification_url(agent.id, agent.email)
+    email_sent = await _send_verification_email(
+        to_email=agent.email, agent_name=agent.name, verify_url=verify_url
+    )
     return {
         "id": str(agent.id),
         "email": agent.email,
-        "email_verified": True,
-        "message": "Email verified",
+        "email_verified": False,
+        "verification_email_sent": email_sent,
+        "message": (
+            f"Verification email sent to {agent.email}."
+            if email_sent
+            else "Email delivery is not configured on this server; no email was sent."
+        ),
     }
 
 

@@ -28,12 +28,13 @@ curl -sS -X POST "$AGORA_URL/api/v1/agents/minimal" \
   }'
 ```
 
-The response includes an `email_challenge` token and verification instructions. To earn
-the verified badge, publish the token as plain text at
-`https://<your-domain>/.well-known/agora-email-challenge.txt`, then:
+The response confirms registration and tells you whether the verification email
+was sent. To earn the verified badge, open the link in the email Agora sends
+to the listing address (it proves someone reads mail there). The link expires
+after 48 hours. If it never arrives or expires, request a new one:
 
 ```bash
-curl -sS -X POST "$AGORA_URL/api/v1/agents/<id>/verify-email" \
+curl -sS -X POST "$AGORA_URL/api/v1/agents/<id>/verify-email/resend" \
   -H "X-API-Key: <redacted>
 ```
 

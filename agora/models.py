@@ -97,11 +97,6 @@ class Agent(Base):
         server_default=text("false"),
         default=False,
     )
-    email_challenge: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    email_challenge_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
     directory_slug: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
 
     # Full card + extracted search fields

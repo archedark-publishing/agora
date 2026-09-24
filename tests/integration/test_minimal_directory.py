@@ -2,32 +2,26 @@
 
 from __future__ import annotations
 
-import httpx
 import pytest
 
-
-class _FakeChallengeResponse:
-    def __init__(self, text: str, status_code: int = 200) -> None:
-        self.text = text
-        self.status_code = status_code
+import agora.main as main_module
 
 
-class _FakeChallengeClient:
-    """Stands in for httpx.AsyncClient during email-challenge verification."""
+@pytest.fixture
+def capture_verification_email(monkeypatch):
+    """Capture outbound verification emails instead of sending them."""
+    sent: list[dict] = []
 
-    published: str = ""
+    async def _fake_send(*, to_email: str, agent_name: str, verify_url: str) -> bool:
+        sent.append(
+            {"to_email": to_email, "agent_name": agent_name, "verify_url": verify_url}
+        )
+        return True
 
-    def __init__(self, *args, **kwargs) -> None:
-        pass
-
-    async def __aenter__(self) -> "_FakeChallengeClient":
-        return self
-
-    async def __aexit__(self, *exc) -> bool:
-        return False
-
-    async def get(self, url: str) -> _FakeChallengeResponse:
-        return _FakeChallengeResponse(type(self).published)
+    monkeypatch.setattr(
+        main_module, "_send_verification_email", _fake_send
+    )
+    return sent
 
 
 def _minimal_payload(name: str = "Ada", email: str = "ada@example.com") -> dict:
@@ -50,12 +44,25 @@ async def _register_minimal(client, payload=None, api_key="minimal-test-key") ->
     return response.json()
 
 
-async def test_minimal_registration_happy_path(client) -> None:
+def _token_from_url(verify_url: str) -> str:
+    assert "token=" in verify_url
+    return verify_url.split("token=", 1)[1]
+
+
+async def test_minimal_registration_happy_path(client, capture_verification_email) -> None:
     body = await _register_minimal(client)
     assert body["name"] == "Ada"
     assert body["directory_slug"] == "ada"
-    assert body["email_challenge"]
-    assert "verify-email" in body["verification_instructions"]
+    assert body["email"] == "ada@example.com"
+    assert body["email_verified"] is False
+    assert body["verification_email_sent"] is True
+    assert "email_challenge" not in body
+
+    assert len(capture_verification_email) == 1
+    sent = capture_verification_email[0]
+    assert sent["to_email"] == "ada@example.com"
+    assert sent["agent_name"] == "Ada"
+    assert sent["verify_url"].startswith("https://the-agora.dev/verify-email?token=")
 
     detail = await client.get(f"/api/v1/agents/{body['id']}")
     assert detail.status_code == 200
@@ -64,7 +71,7 @@ async def test_minimal_registration_happy_path(client) -> None:
     assert payload["response_sla"] == "within 4 hours"
     assert payload["email_verified"] is False
     assert payload["directory_slug"] == "ada"
-    assert payload["url"] is None
+    assert "url" not in payload  # email-only listings have no URL
 
 
 async def test_minimal_registration_validation(client) -> None:
@@ -103,49 +110,97 @@ async def test_minimal_registration_slug_uniqueness(client) -> None:
     assert second["directory_slug"] == "helper-2"
 
 
-async def test_verify_email_success(client, monkeypatch) -> None:
+async def test_verify_email_link_success(client, capture_verification_email) -> None:
     body = await _register_minimal(client, api_key="verify-key")
-    agent_id = body["id"]
+    token = _token_from_url(capture_verification_email[0]["verify_url"])
 
-    _FakeChallengeClient.published = body["email_challenge"]
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeChallengeClient)
-
-    response = await client.post(
-        f"/api/v1/agents/{agent_id}/verify-email", headers={"X-API-Key": "verify-key"}
-    )
+    response = await client.get(f"/verify-email?token={token}")
     assert response.status_code == 200, response.text
-    assert response.json()["email_verified"] is True
+    assert "Email verified" in response.text
 
-    detail = await client.get(f"/api/v1/agents/{agent_id}")
+    detail = await client.get(f"/api/v1/agents/{body['id']}")
     assert detail.json()["email_verified"] is True
 
 
-async def test_verify_email_wrong_token(client, monkeypatch) -> None:
-    body = await _register_minimal(
-        client, _minimal_payload(email="wrong@example.com"), api_key="verify-key-2"
-    )
+async def test_verify_email_link_already_verified(client, capture_verification_email) -> None:
+    await _register_minimal(client, api_key="verify-twice-key")
+    token = _token_from_url(capture_verification_email[0]["verify_url"])
 
-    _FakeChallengeClient.published = "not-the-challenge"
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeChallengeClient)
+    first = await client.get(f"/verify-email?token={token}")
+    assert first.status_code == 200
+
+    second = await client.get(f"/verify-email?token={token}")
+    assert second.status_code == 200
+    assert "Already verified" in second.text
+
+
+async def test_verify_email_link_tampered_token(client) -> None:
+    response = await client.get("/verify-email?token=tampered.payload.here")
+    assert response.status_code == 400
+    assert "invalid or expired" in response.text
+
+
+async def test_verify_email_link_missing_token(client) -> None:
+    response = await client.get("/verify-email")
+    assert response.status_code == 400
+
+
+async def test_verify_email_link_expired(
+    client, capture_verification_email, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        main_module.settings, "email_verification_ttl_hours", -1
+    )
+    await _register_minimal(client, api_key="expired-key")
+    token = _token_from_url(capture_verification_email[0]["verify_url"])
+
+    response = await client.get(f"/verify-email?token={token}")
+    assert response.status_code == 400
+    assert "invalid or expired" in response.text
+
+
+async def test_resend_verification_email(client, capture_verification_email) -> None:
+    body = await _register_minimal(client, api_key="resend-key")
+    assert len(capture_verification_email) == 1
 
     response = await client.post(
-        f"/api/v1/agents/{body['id']}/verify-email", headers={"X-API-Key": "verify-key-2"}
+        f"/api/v1/agents/{body['id']}/verify-email/resend",
+        headers={"X-API-Key": "resend-key"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 200, response.text
+    assert response.json()["verification_email_sent"] is True
+    assert len(capture_verification_email) == 2
 
 
-async def test_verify_email_requires_owner_key(client, monkeypatch) -> None:
-    body = await _register_minimal(
-        client, _minimal_payload(email="owner@example.com"), api_key="owner-key"
-    )
-
-    _FakeChallengeClient.published = body["email_challenge"]
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeChallengeClient)
+async def test_resend_verification_email_requires_owner_key(
+    client, capture_verification_email
+) -> None:
+    body = await _register_minimal(client, api_key="resend-owner-key")
 
     response = await client.post(
-        f"/api/v1/agents/{body['id']}/verify-email", headers={"X-API-Key": "wrong-key"}
+        f"/api/v1/agents/{body['id']}/verify-email/resend",
+        headers={"X-API-Key": "wrong-key"},
     )
     assert response.status_code == 401
+    assert len(capture_verification_email) == 1
+
+
+async def test_resend_verification_email_already_verified(
+    client, capture_verification_email
+) -> None:
+    body = await _register_minimal(client, api_key="resend-done-key")
+    token = _token_from_url(capture_verification_email[0]["verify_url"])
+    verify = await client.get(f"/verify-email?token={token}")
+    assert verify.status_code == 200
+
+    response = await client.post(
+        f"/api/v1/agents/{body['id']}/verify-email/resend",
+        headers={"X-API-Key": "resend-done-key"},
+    )
+    assert response.status_code == 200
+    assert response.json()["email_verified"] is True
+    # No new email goes out for an already-verified listing.
+    assert len(capture_verification_email) == 1
 
 
 async def test_agents_json_feed(client) -> None:
