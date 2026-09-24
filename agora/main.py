@@ -1211,6 +1211,13 @@ async def search_page(
                 "name": sanitize_ui_text(agent["name"], max_length=255),
                 "description": sanitize_ui_text(agent.get("description"), max_length=2000),
                 "url": sanitize_ui_text(agent["url"], max_length=2048),
+                # list_agents() serializes datetimes to ISO strings; the search
+                # template calls .strftime() on this, so parse it back here.
+                "last_healthy_at": (
+                    datetime.fromisoformat(agent["last_healthy_at"])
+                    if agent.get("last_healthy_at")
+                    else None
+                ),
             }
             for agent in results["agents"]
         ],
