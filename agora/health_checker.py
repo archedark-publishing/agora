@@ -177,6 +177,11 @@ async def run_health_check_cycle(
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             for agent in agents:
+                if not agent.url:
+                    # Email-only directory listings have no endpoint to probe;
+                    # liveness comes from heartbeats instead.
+                    summary.skipped_count += 1
+                    continue
                 summary.checked_count += 1
                 healthy = await _check_single_agent(
                     agent,
