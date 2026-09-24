@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     # authentication, and assertionMethod fields per W3C DID Core + Ed25519 2020 suite.
     did_public_key_multibase: str | None = None
 
+    # Outbound email for minimal-directory verification links (via Resend).
+    # When resend_api_key is unset, registration skips sending and logs the
+    # verification link instead (local-dev convenience; not for production).
+    resend_api_key: str | None = None
+    email_from: str = "Agora <verify@the-agora.dev>"
+    email_verify_base_url: str = "https://the-agora.dev"
+    email_verification_ttl_hours: int = 48
+    # HMAC secret for signing email verification tokens. When unset, an
+    # ephemeral process-local key is used and links die on restart.
+    email_signing_secret: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

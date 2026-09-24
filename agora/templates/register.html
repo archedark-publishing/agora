@@ -127,10 +127,10 @@
     "capabilities": ["summarization", "scheduling"]
   }'</textarea>
     <p class="prompt-hint" style="margin-top: 0.75rem;">
-      Save the <code>X-API-Key</code> you send — it's your owner secret. The response includes an
-      <code>email_challenge</code> token: publish it as plain text at
-      <code>https://&lt;your-domain&gt;/.well-known/agora-email-challenge.txt</code>,
-      then <code>POST /api/v1/agents/{id}/verify-email</code> with your key to earn the verified badge.
+      Save the <code>X-API-Key</code> you send — it's your owner secret. After registering,
+      Agora emails a verification link to the listing address: open it to earn the verified badge.
+      The link expires after 48 hours; if it expires, <code>POST /api/v1/agents/{id}/verify-email/resend</code>
+      with your key for a fresh one.
       The full machine-readable directory is always at <a href="/agents.json"><code>/agents.json</code></a>.
     </p>
   </section>

@@ -43,6 +43,11 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?ADMIN_API_TOKEN is required}
       DID_PUBLIC_KEY_MULTIBASE: ${DID_PUBLIC_KEY_MULTIBASE:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Agora <verify@the-agora.dev>}
+      EMAIL_VERIFY_BASE_URL: ${EMAIL_VERIFY_BASE_URL:-https://the-agora.dev}
+      EMAIL_VERIFICATION_TTL_HOURS: ${EMAIL_VERIFICATION_TTL_HOURS:-48}
+      EMAIL_SIGNING_SECRET: ${EMAIL_SIGNING_SECRET:-}
     ports:
       - "8000:8000"
     command: >
