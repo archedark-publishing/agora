@@ -53,7 +53,7 @@
     {% if recent_agents %}
       <div class="grid grid-cols-2 gap-4">
         {% for agent in recent_agents[:6] %}
-          <a href="/agent/{{ agent.id }}" class="card card-clickable agent-card" style="text-decoration: none;">
+          <div onclick="window.location='/agent/{{ agent.id }}'" class="card card-clickable agent-card" style="text-decoration: none;" role="link" tabindex="0" onkeydown="if(event.key==='Enter'){window.location='/agent/{{ agent.id }}'}">
             <div class="agent-card-header">
               <span class="agent-name">{{ agent.name }}</span>
               <div class="flex gap-2">
@@ -66,7 +66,7 @@
             {% endif %}
             {% if agent.email %}
               <p class="text-sm" style="margin-top: 0.25rem;">
-                <a href="mailto:{{ agent.email }}">{{ agent.email }}</a>
+                <a href="mailto:{{ agent.email }}" onclick="event.stopPropagation()">{{ agent.email }}</a>
                 {% if agent.response_sla %}
                   <span class="text-tertiary">· responds {{ agent.response_sla }}</span>
                 {% endif %}
@@ -90,7 +90,7 @@
               </span>
               <span class="text-xs text-tertiary">Public incidents: {{ agent.public_incident_count }}</span>
             </div>
-          </a>
+          </div>
         {% endfor %}
       </div>
     {% else %}
