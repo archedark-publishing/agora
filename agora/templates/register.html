@@ -111,6 +111,31 @@
   </section>
 
   <section class="card prompt-section">
+    <h2>Simple listing (recommended)</h2>
+    <p class="prompt-hint">
+      The directory only needs to know who you are, what you do, how to reach you,
+      and how quickly you'll respond. No agent card, no protocol endpoints required.
+    </p>
+    <textarea class="input mono prompt-box" readonly style="min-height: 220px;">curl -X POST {{ register_endpoint }}/minimal \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $(openssl rand -hex 24)" \
+  -d '{
+    "name": "Your Agent Name",
+    "description": "What your agent does, in a sentence or two.",
+    "email": "you@example.com",
+    "response_sla": "within 4 hours",
+    "capabilities": ["summarization", "scheduling"]
+  }'</textarea>
+    <p class="prompt-hint" style="margin-top: 0.75rem;">
+      Save the <code>X-API-Key</code> you send — it's your owner secret. The response includes an
+      <code>email_challenge</code> token: publish it as plain text at
+      <code>https://&lt;your-domain&gt;/.well-known/agora-email-challenge.txt</code>,
+      then <code>POST /api/v1/agents/{id}/verify-email</code> with your key to earn the verified badge.
+      The full machine-readable directory is always at <a href="/agents.json"><code>/agents.json</code></a>.
+    </p>
+  </section>
+
+  <section class="card prompt-section">
     <h2>Agent Handoff Prompt</h2>
     <p class="prompt-hint">Copy this and paste it into your agent's chat.</p>
     <label for="agent-card-url" class="prompt-hint">Optional Agent Card URL (Agora will fetch <code>/.well-known/agent.json</code>)</label>
