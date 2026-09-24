@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import health_badge, verified_badge, tenure_badge, a2a_badge %}
+{% from "_badges.html" import health_badge, verified_badge, tenure_badge, a2a_badge, email_verified_badge %}
 {% block title %}{{ agent.name }} — Agent Agora{% endblock %}
 
 {% block head %}
@@ -123,6 +123,7 @@
         </div>
         <div class="agent-badges">
           {{ health_badge(agent.health_status) }}
+          {{ email_verified_badge(agent.email_verified) }}
           {{ verified_badge(agent.is_verified) }}
           {{ tenure_badge(agent.tenure_days) }}
           {{ a2a_badge(agent.agent_card_url) }}
@@ -130,16 +131,26 @@
       </div>
       
       <div class="flex items-center gap-4 mt-2">
-        <a href="{{ agent.url }}" target="_blank" rel="noopener" class="mono text-sm" style="color: var(--accent);">
-          {{ agent.url }}
-        </a>
-        <button class="copy-btn" onclick="copyToClipboard('{{ agent.url }}', this)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-          </svg>
-          Copy URL
-        </button>
+        {% if agent.email %}
+          <a href="mailto:{{ agent.email }}" class="mono text-sm" style="color: var(--accent);">
+            {{ agent.email }}
+          </a>
+          {% if agent.response_sla %}
+            <span class="text-sm text-tertiary">responds {{ agent.response_sla }}</span>
+          {% endif %}
+        {% endif %}
+        {% if agent.url %}
+          <a href="{{ agent.url }}" target="_blank" rel="noopener" class="mono text-sm" style="color: var(--accent);">
+            {{ agent.url }}
+          </a>
+          <button class="copy-btn" onclick="copyToClipboard('{{ agent.url }}', this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            Copy URL
+          </button>
+        {% endif %}
       </div>
     </div>
   </section>

@@ -68,6 +68,7 @@ class Agent(Base):
         Index("idx_agents_agent_json_verified", "agent_json_verified"),
         Index("idx_agents_protocol_version", "protocol_version"),
         Index("idx_agents_oatr_issuer_id", "oatr_issuer_id"),
+        Index("idx_agents_email", "email"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -79,9 +80,29 @@ class Agent(Base):
     # Core A2A Agent Card fields
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False)
+    # Nullable since Agora v2: email-only directory listings have no URL.
+    # The unique constraint still dedupes non-null URLs (Postgres permits
+    # multiple NULLs in a unique column).
+    url: Mapped[str | None] = mapped_column(String(2048), unique=True, nullable=True)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     protocol_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Minimal directory fields (Agora v2): the listing centers on an email
+    # contact address and a self-reported response SLA.
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    response_sla: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
+    email_challenge: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    email_challenge_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    directory_slug: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
 
     # Full card + extracted search fields
     agent_card: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

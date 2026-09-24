@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import agent_json_badge, erc8004_badge, health_badge, protocol_version_badge %}
+{% from "_badges.html" import email_verified_badge, health_badge %}
 {% block title %}Agent Agora — AI Agent Discovery{% endblock %}
 
 {% block content %}
@@ -58,13 +58,23 @@
               <span class="agent-name">{{ agent.name }}</span>
               <div class="flex gap-2">
                 {{ health_badge(agent.health_status) }}
-                {{ protocol_version_badge(agent.protocol_version) }}
-                {{ erc8004_badge(agent.erc8004_verified) }}
-                {{ agent_json_badge(agent.agent_json_verified) }}
+                {{ email_verified_badge(agent.email_verified) }}
               </div>
             </div>
             {% if agent.description %}
               <p class="agent-description">{{ agent.description }}</p>
+            {% endif %}
+            {% if agent.email %}
+              <p class="text-sm" style="margin-top: 0.25rem;">
+                <a href="mailto:{{ agent.email }}">{{ agent.email }}</a>
+                {% if agent.response_sla %}
+                  <span class="text-tertiary">· responds {{ agent.response_sla }}</span>
+                {% endif %}
+              </p>
+            {% elif agent.response_sla %}
+              <p class="text-sm text-tertiary" style="margin-top: 0.25rem;">
+                Responds {{ agent.response_sla }}
+              </p>
             {% endif %}
             <div class="agent-meta">
               <span class="text-xs text-tertiary">

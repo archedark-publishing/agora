@@ -17,6 +17,7 @@ from typing import Any, Literal
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import unicodedata
 
 import httpx
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, Response, status
@@ -1114,6 +1115,9 @@ async def home_page(
                 "protocol_version": agent.protocol_version,
                 "erc8004_verified": agent.erc8004_verified,
                 "agent_json_verified": agent.agent_json_verified,
+                "email": sanitize_ui_text(agent.email, max_length=320),
+                "response_sla": sanitize_ui_text(agent.response_sla, max_length=255),
+                "email_verified": agent.email_verified,
                 "commitments_count": agent.commitments_count,
                 "commitments_summary": sanitize_ui_text(agent.commitments_summary, max_length=2000)
                 if agent.commitments_summary
@@ -1187,6 +1191,10 @@ async def search_page(
         has_protocol_version=None,
         protocol_version=None,
         oatr_issuer_id=None,
+        # schedule_basis must be passed explicitly: Query() defaults are only
+        # resolved by FastAPI, and the raw Query object would be bound as a
+        # SQL parameter (asyncpg: "expected str, got Query").
+        schedule_basis=None,
         limit=limit,
         offset=offset,
     )
@@ -1273,6 +1281,9 @@ async def agent_detail_page(
         "name": safe_agent_card.get("name") or "Unnamed agent",
         "description": safe_agent_card.get("description"),
         "url": safe_agent_card.get("url"),
+        "email": sanitize_ui_text(detail.get("email"), max_length=320),
+        "response_sla": sanitize_ui_text(detail.get("response_sla"), max_length=255),
+        "email_verified": detail.get("email_verified", False),
         "health_status": detail.get("health_status") or "unknown",
         "is_verified": False,
         "tenure_days": tenure_days,
@@ -3214,6 +3225,380 @@ async def register_agent(
     }
 
 
+# ---------------------------------------------------------------------------
+# Agora v2 minimal directory
+#
+# The registry is a directory first: who is this agent, what does it do, how
+# do I contact it, how quickly will it respond. Registration needs only a
+# name, a description, an email address, and a self-reported response SLA.
+# Email ownership is proven by publishing a challenge token at a well-known
+# URL on the email's domain (no outbound email infrastructure required).
+# ---------------------------------------------------------------------------
+
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$")
+_EMAIL_CHALLENGE_TTL = timedelta(days=7)
+_EMAIL_CHALLENGE_WELL_KNOWN_PATH = "/.well-known/agora-email-challenge.txt"
+
+
+def _normalize_email_field(*, field_name: str, value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid minimal registration payload",
+                "errors": [
+                    {
+                        "field": field_name,
+                        "message": "Email address is required",
+                        "type": "value_error.missing",
+                    }
+                ],
+            },
+        )
+    if len(raw) > 320 or not _EMAIL_RE.match(raw):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid minimal registration payload",
+                "errors": [
+                    {
+                        "field": field_name,
+                        "message": "Invalid email address",
+                        "type": "value_error.email",
+                    }
+                ],
+            },
+        )
+    local, _, domain = raw.partition("@")
+    return f"{local}@{domain.lower()}"
+
+
+def _normalize_capability_list(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="capabilities must be a list of strings",
+        )
+    capabilities: list[str] = []
+    for entry in value:
+        text = str(entry or "").strip()
+        if text:
+            if len(text) > 120:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="capability entries must be at most 120 characters",
+                )
+            capabilities.append(text)
+    if len(capabilities) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="capabilities must have at most 50 entries",
+        )
+    return capabilities or None
+
+
+def _slugify_name(name: str) -> str:
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
+    return slug[:60] or "agent"
+
+
+async def _unique_directory_slug(session: AsyncSession, base: str) -> str:
+    candidate = base
+    suffix = 2
+    while (
+        await session.scalar(
+            select(Agent.id).where(Agent.directory_slug == candidate).limit(1)
+        )
+        is not None
+    ):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+        if suffix > 1000:  # pathological; fall back to randomness
+            candidate = f"{base}-{token_urlsafe(6).lower()}"
+            break
+    return candidate
+
+
+def _minimal_listing(agent: Agent) -> dict[str, Any]:
+    last_seen = agent.last_healthy_at or agent.updated_at or agent.registered_at
+    return {
+        "slug": agent.directory_slug,
+        "name": agent.name,
+        "description": agent.description,
+        "email": agent.email,
+        "response_sla": agent.response_sla,
+        "capabilities": list(agent.capabilities or []),
+        "url": agent.url,
+        "verified_email": agent.email_verified,
+        "health_status": agent.health_status,
+        "last_seen": last_seen.isoformat() if last_seen else None,
+    }
+
+
+@app.post("/api/v1/agents/minimal", status_code=status.HTTP_201_CREATED, tags=["agents"])
+async def register_agent_minimal(
+    payload: dict[str, Any],
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    """Register with the minimal directory listing.
+
+    Required: name, description, email. Optional: response_sla,
+    capabilities (list of strings), url. The X-API-Key header is a
+    self-chosen owner secret (stored as a hash) used for later updates,
+    heartbeats, and email verification — same ownership model as the
+    full A2A registration.
+    """
+    await _enforce_registration_rate_limits(request, api_key)
+
+    sanitized_payload = sanitize_json_strings(payload)
+    name = _normalize_optional_string_field(
+        field_name="name", value=sanitized_payload.get("name"), max_length=255
+    )
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="name is required",
+        )
+    description = _normalize_optional_string_field(
+        field_name="description",
+        value=sanitized_payload.get("description"),
+        max_length=5000,
+    )
+    email = _normalize_email_field(field_name="email", value=sanitized_payload.get("email"))
+    response_sla = _normalize_optional_string_field(
+        field_name="response_sla",
+        value=sanitized_payload.get("response_sla"),
+        max_length=255,
+    )
+    capabilities = _normalize_capability_list(sanitized_payload.get("capabilities"))
+
+    raw_url = _normalize_optional_string_field(
+        field_name="url", value=sanitized_payload.get("url"), max_length=2048
+    )
+    normalized_url: str | None = None
+    if raw_url:
+        try:
+            normalized_url = normalize_url(raw_url)
+        except URLNormalizationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid url: {exc}",
+            ) from exc
+        try:
+            assert_url_safe_for_registration(
+                normalized_url,
+                allow_private=settings.allow_private_network_targets,
+                allow_unresolvable=settings.allow_unresolvable_registration_hostnames,
+            )
+        except URLSafetyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid url: {exc}",
+            ) from exc
+
+    existing_by_email = await session.scalar(
+        select(Agent.id).where(Agent.email == email).limit(1)
+    )
+    if existing_by_email:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An agent with this email is already registered",
+        )
+    if normalized_url:
+        existing_by_url = await session.scalar(
+            select(Agent.id).where(Agent.url == normalized_url).limit(1)
+        )
+        if existing_by_url:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An agent with this URL is already registered",
+            )
+
+    challenge = token_urlsafe(32)
+    slug = await _unique_directory_slug(session, _slugify_name(name))
+    now_utc = datetime.now(tz=timezone.utc)
+
+    minimal_card: dict[str, Any] = {
+        "name": name,
+        "email": email,
+        "directory_listing": True,
+    }
+    if description:
+        minimal_card["description"] = description
+    if response_sla:
+        minimal_card["response_sla"] = response_sla
+    if capabilities:
+        minimal_card["capabilities"] = capabilities
+    if normalized_url:
+        minimal_card["url"] = normalized_url
+
+    agent = Agent(
+        name=name,
+        description=description,
+        url=normalized_url,
+        agent_card=minimal_card,
+        capabilities=capabilities,
+        email=email,
+        response_sla=response_sla,
+        email_verified=False,
+        email_challenge=challenge,
+        email_challenge_expires_at=now_utc + _EMAIL_CHALLENGE_TTL,
+        directory_slug=slug,
+        owner_key_hash=hash_api_key(api_key),
+    )
+    session.add(agent)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An agent with this email or URL is already registered",
+        ) from exc
+
+    await session.refresh(agent)
+    email_domain = email.split("@", 1)[1]
+    return {
+        "id": str(agent.id),
+        "name": agent.name,
+        "directory_slug": agent.directory_slug,
+        "registered_at": agent.registered_at.isoformat(),
+        "message": "Agent registered. Verify email ownership to complete the listing.",
+        "email_challenge": challenge,
+        "email_challenge_expires_at": agent.email_challenge_expires_at.isoformat()
+        if agent.email_challenge_expires_at
+        else None,
+        "verification_instructions": (
+            f"Publish the challenge token as plain text at "
+            f"https://{email_domain}{_EMAIL_CHALLENGE_WELL_KNOWN_PATH} "
+            f"then POST to /api/v1/agents/{agent.id}/verify-email "
+            f"with your X-API-Key header."
+        ),
+    }
+
+
+@app.post("/api/v1/agents/{agent_id}/verify-email", tags=["agents"])
+async def verify_agent_email(
+    agent_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    """Verify email ownership for a minimal directory listing.
+
+    The agent proves control of the email's domain by publishing the
+    challenge token (issued at registration) as plain text at
+    https://<domain>/.well-known/agora-email-challenge.txt. The directory
+    fetches it and compares. Requires the owner's X-API-Key.
+    """
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
+        )
+
+    if agent.email_verified:
+        return {
+            "id": str(agent.id),
+            "email": agent.email,
+            "email_verified": True,
+            "message": "Email already verified",
+        }
+
+    if not agent.email or not agent.email_challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending email challenge for this agent",
+        )
+
+    now_utc = datetime.now(tz=timezone.utc)
+    if agent.email_challenge_expires_at and agent.email_challenge_expires_at < now_utc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Email challenge expired. Re-register to get a new challenge.",
+        )
+
+    domain = agent.email.split("@", 1)[1]
+    challenge_url = f"https://{domain}{_EMAIL_CHALLENGE_WELL_KNOWN_PATH}"
+    try:
+        safe_target = assert_url_safe_for_outbound(
+            challenge_url,
+            allow_private=settings.allow_private_network_targets,
+        )
+    except URLSafetyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Cannot verify email domain: {exc}",
+        ) from exc
+
+    published_token: str | None = None
+    try:
+        async with pin_hostname_resolution(safe_target.hostname, safe_target.pinned_ip):
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10), follow_redirects=True
+            ) as client:
+                response = await client.get(challenge_url)
+                if response.status_code == 200 and response.text:
+                    published_token = response.text.strip().split()[0]
+    except (httpx.HTTPError, OSError):
+        published_token = None
+
+    if published_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Challenge token not found at {challenge_url}. "
+                "Publish the token as plain text there, then retry."
+            ),
+        )
+
+    if not hmac.compare_digest(published_token, agent.email_challenge):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Published token does not match the challenge",
+        )
+
+    agent.email_verified = True
+    agent.email_challenge = None
+    agent.email_challenge_expires_at = None
+    await session.commit()
+    await session.refresh(agent)
+    return {
+        "id": str(agent.id),
+        "email": agent.email,
+        "email_verified": True,
+        "message": "Email verified",
+    }
+
+
+@app.get("/agents.json", tags=["meta"], include_in_schema=False)
+async def agents_json_directory(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Machine-readable minimal directory feed.
+
+    One flat JSON document: who each agent is, what it does, how to
+    contact it, and how quickly it says it will respond.
+    """
+    result = await session.execute(
+        select(Agent).order_by(Agent.registered_at.desc()).limit(500)
+    )
+    agents = list(result.scalars().all())
+    return {
+        "agents": [_minimal_listing(agent) for agent in agents],
+        "count": len(agents),
+        "updated_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+
+
 @app.post("/api/v1/agents/{agent_id}/recovery/start", tags=["recovery"])
 async def start_recovery(
     agent_id: UUID,
@@ -3716,6 +4101,10 @@ async def get_agent_detail(
         "operator": agent.operator,
         "availability": agent.availability,
         "taskLatency": agent.task_latency,
+        "email": agent.email,
+        "response_sla": agent.response_sla,
+        "email_verified": agent.email_verified,
+        "directory_slug": agent.directory_slug,
     }
 
 
