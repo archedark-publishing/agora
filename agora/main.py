@@ -64,7 +64,11 @@ from agora.security import (
     should_rehash_api_key_hash,
     verify_api_key,
 )
-from agora.stale import compute_agent_stale_metadata, stale_filter_expression
+from agora.stale import (
+    agent_counts_as_live,
+    compute_agent_stale_metadata,
+    stale_filter_expression,
+)
 from agora.url_normalization import URLNormalizationError, normalize_url
 from agora.url_safety import (
     URLSafetyError,
@@ -1080,14 +1084,20 @@ async def home_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    total_agents = int((await session.scalar(select(func.count(Agent.id)))) or 0)
-    healthy_agents = int(
-        (
-            await session.scalar(
-                select(func.count(Agent.id)).where(Agent.health_status == "healthy")
-            )
+    now_utc = datetime.now(tz=timezone.utc)
+    liveness_rows = list(
+        await session.execute(select(Agent.health_status, Agent.url, Agent.availability))
+    )
+    total_agents = len(liveness_rows)
+    healthy_agents = sum(
+        1
+        for health_status, url, availability in liveness_rows
+        if agent_counts_as_live(
+            health_status=health_status,
+            url=url,
+            availability=availability,
+            now=now_utc,
         )
-        or 0
     )
     recent_agents = list(
         (
@@ -1102,7 +1112,6 @@ async def home_page(
         subject_ids=[agent.id for agent in recent_agents],
     )
 
-    now_utc = datetime.now(tz=timezone.utc)
     cards = []
     for agent in recent_agents:
         is_stale, stale_days = compute_agent_stale_metadata(agent, now=now_utc)
