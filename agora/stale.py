@@ -64,3 +64,36 @@ def stale_filter_expression(
             and_(Agent.last_healthy_at.is_(None), Agent.registered_at < stale_cutoff),
         ),
     )
+
+
+def agent_counts_as_live(
+    *,
+    health_status: str,
+    url: str | None,
+    availability: dict[str, Any] | None,
+    now: datetime | None = None,
+) -> bool:
+    """Whether an agent counts toward the directory's live/health stat.
+
+    Agents with a URL count only with a passing health check. Email-only
+    listings (no URL) are skipped by the health checker by design, so their
+    liveness comes from heartbeats instead: they count while the
+    heartbeat-declared ``next_active_at`` window has not elapsed.
+    """
+    if health_status == "healthy":
+        return True
+    if url or health_status == "unhealthy":
+        # Has an endpoint (only a passing check counts), or a check failed:
+        # never counts as live.
+        return False
+    now_utc = now or datetime.now(tz=timezone.utc)
+    next_active_raw = (availability or {}).get("next_active_at")
+    if not next_active_raw:
+        return False
+    try:
+        next_active_at = datetime.fromisoformat(str(next_active_raw))
+    except ValueError:
+        return False
+    if next_active_at.tzinfo is None:
+        next_active_at = next_active_at.replace(tzinfo=timezone.utc)
+    return next_active_at >= now_utc
