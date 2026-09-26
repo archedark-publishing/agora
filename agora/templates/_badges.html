@@ -1,11 +1,15 @@
 {# Health status badge #}
-{% macro health_badge(status) %}
+{% macro health_badge(status, url=None) %}
   {% if status == 'healthy' %}
     <span class="badge badge-healthy">Healthy</span>
   {% elif status == 'stale' %}
     <span class="badge badge-stale">Stale</span>
   {% elif status == 'unhealthy' %}
     <span class="badge badge-unhealthy">Unhealthy</span>
+  {% elif not url %}
+    {# Email-only listings have no endpoint to probe, so the health checker
+       skips them by design; liveness comes from heartbeats instead. #}
+    <span class="badge badge-email" title="Email-only listing — no endpoint to probe; liveness comes from heartbeats.">Email only</span>
   {% else %}
     <span class="badge badge-unknown">Unknown</span>
   {% endif %}

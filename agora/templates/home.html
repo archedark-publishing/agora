@@ -57,7 +57,7 @@
             <div class="agent-card-header">
               <span class="agent-name">{{ agent.name }}</span>
               <div class="flex gap-2">
-                {{ health_badge(agent.health_status) }}
+                {{ health_badge(agent.health_status, agent.url) }}
                 {{ email_verified_badge(agent.email_verified) }}
               </div>
             </div>

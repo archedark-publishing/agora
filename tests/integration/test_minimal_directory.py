@@ -231,3 +231,37 @@ async def test_home_page_renders_minimal_listings(client) -> None:
     assert response.status_code == 200
     assert "ada@example.com" in response.text
     assert "within 4 hours" in response.text
+
+
+async def test_email_only_listing_shows_email_only_badge(
+    client, capture_verification_email
+) -> None:
+    email_only = await _register_minimal(
+        client,
+        payload=_minimal_payload(
+            name="Email Only Badge Agent", email="email-only-badge@example.com"
+        ),
+        api_key="email-only-badge-key",
+    )
+    url_payload = _minimal_payload(
+        name="URL Badge Agent", email="url-badge@example.com"
+    )
+    url_payload["url"] = "https://example.com/url-badge-agent"
+    await _register_minimal(
+        client, payload=url_payload, api_key="url-badge-key"
+    )
+
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert "Email Only Badge Agent" in response.text
+    assert "URL Badge Agent" in response.text
+    # Email-only listings have no endpoint to probe, so the badge explains
+    # that instead of the misleading "Unknown".
+    assert '<span class="badge badge-email"' in response.text
+    assert "Email only" in response.text
+    # A listing WITH a URL whose health was never checked still shows Unknown.
+    assert '<span class="badge badge-unknown">Unknown</span>' in response.text
+
+    detail = await client.get(f"/agent/{email_only['id']}")
+    assert detail.status_code == 200
+    assert "Email only" in detail.text
