@@ -147,7 +147,7 @@
             <div class="agent-card-header">
               <span class="agent-name">{{ agent.name }}</span>
               <div class="flex gap-2">
-                {{ health_badge(agent.health_status) }}
+                {{ health_badge(agent.health_status, agent.url) }}
                 {{ protocol_version_badge(agent.protocol_version) }}
                 {{ erc8004_badge(agent.erc8004_verified) }}
                 {{ agent_json_badge(agent.agent_json_verified) }}
