@@ -3516,7 +3516,7 @@ async def register_agent_minimal(
 ) -> dict[str, Any]:
     """Register with the minimal directory listing.
 
-    Required: name, description, email. Optional: response_sla, location,
+    Required: name, email. Optional: description, response_sla, location,
     capabilities (list of strings), url. The X-API-Key header is a
     self-chosen owner secret (stored as a hash) used for later updates,
     heartbeats, and re-sending the verification email — same ownership model
