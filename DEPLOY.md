@@ -116,3 +116,20 @@ ssh -i ~/.ssh/id_ed25519_agora_gha exedev@the-agora-staging.exe.xyz '
 ```
 
 Production follows the same pattern with the production VM and deploy path.
+
+## VM Watchdog
+
+Production runs a watchdog script every 5 minutes via the deploy user's
+crontab. It checks Docker Compose service state, the app health endpoint,
+recent 5xx responses in api logs, disk usage, and memory/load, and sends
+ntfy alerts on state transitions (problem detected, recovered, hourly
+reminder while a problem persists).
+
+- Script: `scripts/vm-watchdog.sh` (versioned; cron runs it from the checkout
+  so deploys pick up updates automatically)
+- Installed by the `Install VM watchdog` step in `deploy-agora.yml`
+- Config: `~/.config/agora-watchdog.conf` on the VM (written at deploy time
+  from secrets; never committed)
+- Requires the `NTFY_TOPIC` secret on the `production` GitHub environment.
+  If unset, the install step warns and skips without failing the deploy.
+- Logs: `~/.local/share/agora-watchdog/cron.log` on the VM

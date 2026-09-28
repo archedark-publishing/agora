@@ -76,3 +76,32 @@ jobs:
           docker compose up -d --build --force-recreate --remove-orphans
           docker compose ps
           EOF
+
+      - name: Install VM watchdog
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "::warning::NTFY_TOPIC secret not set; skipping watchdog install (deploy continues)"
+            exit 0
+          fi
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -i "$HOME/.ssh/exe_deploy_key" "$EXE_SSH_DEST" \
+            "NTFY_TOPIC='$NTFY_TOPIC' DEPLOY_PATH='$EXE_DEPLOY_PATH' bash -se" <<'EOF'
+          set -euo pipefail
+          # Config lives outside the repo; the topic value comes from the
+          # GitHub secret and is never committed.
+          mkdir -p "$HOME/.config" "$HOME/.local/share/agora-watchdog"
+          printf 'NTFY_TOPIC=%q\nDEPLOY_PATH=%q\n' "$NTFY_TOPIC" "$DEPLOY_PATH" \
+            > "$HOME/.config/agora-watchdog.conf"
+          chmod 600 "$HOME/.config/agora-watchdog.conf"
+          # Cron runs the versioned script from the checkout, so deploys
+          # automatically pick up watchdog updates. Idempotent.
+          cron_line="*/5 * * * * $DEPLOY_PATH/scripts/vm-watchdog.sh >> $HOME/.local/share/agora-watchdog/cron.log 2>&1"
+          (crontab -l 2>/dev/null | grep -v 'scripts/vm-watchdog.sh' || true; echo "$cron_line") | crontab -
+          crontab -l | grep 'scripts/vm-watchdog.sh'
+          echo "Watchdog installed."
+          EOF
