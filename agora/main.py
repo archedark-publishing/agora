@@ -3795,6 +3795,21 @@ async def start_recovery(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
+    if not agent.url:
+        recovery_logger.info(
+            "recovery_abuse action=start agent_id=%s source_ip=%s outcome=no_url",
+            agent_id,
+            _client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Recovery requires a URL-backed listing. This listing has no URL "
+                "(email-only registration), so ownership cannot be proven with a "
+                "URL challenge. Retain your ownership key \u2014 it cannot be rotated."
+            ),
+        )
+
     challenge_token = token_urlsafe(32)
     recovery_session_secret = token_urlsafe(32)
     now_utc = datetime.now(tz=timezone.utc)

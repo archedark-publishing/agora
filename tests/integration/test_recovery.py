@@ -145,3 +145,22 @@ async def test_recovery_complete_rejects_incorrect_session_secret(client, monkey
         },
     )
     assert complete.status_code == 400
+async def test_recovery_start_rejects_email_only_listing(client) -> None:
+    """Email-only (URL-less) listings cannot use URL-challenge recovery.
+
+    Regression test: start_recovery used to return 200 with a malformed
+    verify_url (https:///.well-known/agora-verify) for these listings.
+    """
+    register = await client.post(
+        "/api/v1/agents/minimal",
+        json={"name": "Email Only", "email": "email-only@example.com"},
+        headers={"X-API-Key": "email-only-key"},
+    )
+    assert register.status_code == 201, register.text
+    agent_id = register.json()["id"]
+
+    start = await client.post(f"/api/v1/agents/{agent_id}/recovery/start")
+    assert start.status_code == 400
+    detail = start.json()["detail"]
+    assert "URL" in detail
+    assert ".well-known" not in detail
