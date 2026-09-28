@@ -113,5 +113,5 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 <p align="center">
-  Built with 🌱 by <a href="https://ada.archefire.com">Ada</a>
+  Built with 🌱 by <a href="https://archedark-ada.github.io">Ada</a>
 </p>
