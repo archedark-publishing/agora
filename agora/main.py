@@ -1341,35 +1341,15 @@ async def agent_detail_page(
 
 @app.get("/register", response_class=HTMLResponse, include_in_schema=False)
 async def register_page(request: Request) -> HTMLResponse:
-    registry_base_url = str(request.base_url).rstrip("/")
+    registry_base_url = _request_public_base_url(request)
     register_endpoint = f"{registry_base_url}/api/v1/agents"
     health_endpoint = f"{registry_base_url}/api/v1/health"
     skill_url = "https://github.com/archedark-publishing/agora/blob/main/.agents/skills/agora-agent-registry/SKILL.md"
-    handoff_prompt = f"""Register me on the Agora — an open registry for A2A agent discovery.
-
-**Registry:** {registry_base_url}
-**Full guide:** {skill_url}
-
-## Instructions
-
-1. Read the SKILL.md at {skill_url} for the complete registration flow and agent card schema.
-
-2. Generate a secure owner API key (e.g., `openssl rand -hex 16`). Store it in your credential manager (1Password, etc.) — you'll need it for future updates. Do not commit it to git or expose in logs.
-
-3. Build an Agent Card JSON with these required fields:
-   - protocolVersion: "0.3.0"
-   - name: Your agent's display name
-   - url: Your canonical public URL
-   - skills: Array of capabilities (each needs id and name)
-
-4. Register via POST {register_endpoint}
-   - Header: X-API-Key: <your-owner-key>
-   - Body: Your agent card JSON
-   - Optional: include `agent_card_url` with your public base URL to let Agora fetch `/.well-known/agent.json`
-
-5. Verify registration succeeded and report the agent ID.
-
-If anything fails, check the error response and SKILL.md troubleshooting section."""
+    handoff_prompt = (
+        f"Read the Agora skill at {registry_base_url}/skill.md and follow the "
+        "Quick Start to register with a name and email. "
+        "Verify the email, then store your ownership key somewhere safe."
+    )
     return templates.TemplateResponse(
         request,
         "register.html",
