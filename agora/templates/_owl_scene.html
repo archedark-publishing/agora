@@ -20,23 +20,42 @@
       <stop offset="1" stop-color="#2E241B"/>
     </linearGradient>
     <linearGradient id="wingGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3B82F6"/>
-      <stop offset="1" stop-color="#1D4ED8"/>
+      <stop offset="0" stop-color="var(--o-mid)"/>
+      <stop offset="1" stop-color="var(--o-blue)"/>
+    </linearGradient>
+    <linearGradient id="wingGradShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--o-blue)"/>
+      <stop offset="1" stop-color="var(--o-navy)"/>
     </linearGradient>
     <linearGradient id="bodyGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#60A5FA"/>
-      <stop offset=".5" stop-color="#3B82F6"/>
-      <stop offset="1" stop-color="#2563EB"/>
+      <stop offset="0" stop-color="var(--o-sky)"/>
+      <stop offset=".5" stop-color="var(--o-mid)"/>
+      <stop offset="1" stop-color="var(--o-blue)"/>
     </linearGradient>
     <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#BFDBFE"/>
+      <stop offset="0" stop-color="var(--o-white)"/>
+      <stop offset="1" stop-color="var(--o-frost)"/>
     </linearGradient>
     <clipPath id="bodyClip">
-      <path d="M86,226 C82,186 88,150 100,122 C98,102 90,82 76,58 C104,70 134,90 154,112 C170,106 185,104 200,104 C215,104 230,106 246,112 C266,90 296,70 324,58 C310,82 302,102 300,122 C312,150 318,186 314,226 C326,286 322,352 290,395 C258,424 142,424 110,395 C78,352 74,286 86,226 Z"/>
+      <path d="M86,228 C82,190 86,158 98,132 C94,110 88,78 82,42 C108,60 132,88 150,112 C166,106 184,104 200,104 C216,104 234,106 250,112 C268,88 292,60 318,42 C312,78 306,110 302,132 C314,158 318,190 314,228 C326,288 322,352 290,395 C258,424 142,424 110,395 C78,352 74,288 86,228 Z"/>
     </clipPath>
     <clipPath id="eyeClipL"><circle cx="152" cy="192" r="42"/></clipPath>
     <clipPath id="eyeClipR"><circle cx="248" cy="192" r="42"/></clipPath>
+    <!-- one talon; origin sits on the top of the branch, claw hooks toward +x -->
+    <g id="owl-toe" stroke-linejoin="round">
+      <path d="M-6,-14 L-6,0 C-6,7 -4,11 0,12 C4,11 6,7 6,0 L6,-14 Z" fill="var(--o-pale)"/>
+      <path d="M-6,1 C-6,7 -4,11 0,12 C4,11 6,7 6,1 Z" fill="var(--o-frost)"/>
+      <path d="M-6,-14 L-6,0 C-6,7 -4,11 0,12 C4,11 6,7 6,0 L6,-14" fill="none" stroke="var(--o-ink)" stroke-width="4"/>
+      <path d="M-4,8 C-4,16 -1,22 5,24 C2.5,19 2,14 4,8 Z" fill="var(--o-ink)"/>
+    </g>
+    <!-- one wing, folded, pivoting on the round shoulder cap at (102,244) -->
+    <g id="owl-wing">
+      <path d="M87.9,249.1 A15,15 0 1 1 116.1,249.1 C130,296 136,352 128,398 Q124,412 113,404 Q106,414 97,401 Q86,408 79,388 C68,340 70,292 87.9,249.1 Z"
+            stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
+      <g stroke="var(--o-light)" stroke-width="5" stroke-linecap="round" fill="none">
+        <path d="M94,298 L91,374 M106,272 V392 M119,296 L121,384"/>
+      </g>
+    </g>
   </defs>
 
   <g transform="translate(-420,-120) scale(1.2)">
@@ -122,49 +141,67 @@
     </g>
   </g>
 
-  <!-- ===== OWL ===== owl-local coords: 400 x 440, feet at y≈410 -->
+  <!-- ===== OWL ===== owl-local coords: 400 x 440, feet at y≈410.
+       Strokes: 6 for major shapes (body, face, eyes, wings), 4 for detail. -->
   <g transform="translate(150,128) scale(1.25)">
     <g id="owl-fly">
     <g id="owl" class="flapping">
       <!-- soft contact shadow on branch -->
-      <ellipse cx="200" cy="420" rx="90" ry="6" fill="#000" opacity=".12"/>
+      <ellipse cx="200" cy="421" rx="80" ry="6" fill="var(--o-ink)" opacity=".14"/>
+
+      <!-- talons curling over the branch, tucked under the belly -->
+      <g id="feet">
+        <use href="#owl-toe" transform="translate(164,417) rotate(14)"/>
+        <use href="#owl-toe" transform="translate(176,418)"/>
+        <use href="#owl-toe" transform="translate(188,418) rotate(-10)"/>
+        <use href="#owl-toe" transform="translate(236,422) rotate(-14) scale(-1,1)"/>
+        <use href="#owl-toe" transform="translate(224,422) scale(-1,1)"/>
+        <use href="#owl-toe" transform="translate(212,421) rotate(10) scale(-1,1)"/>
+      </g>
 
       <g id="owl-body">
-        <!-- body silhouette -->
-        <path d="M86,226 C82,186 88,150 100,122 C98,102 90,82 76,58 C104,70 134,90 154,112 C170,106 185,104 200,104 C215,104 230,106 246,112 C266,90 296,70 324,58 C310,82 302,102 300,122 C312,150 318,186 314,226 C326,286 322,352 290,395 C258,424 142,424 110,395 C78,352 74,286 86,226 Z"
-              fill="url(#bodyGrad)" stroke="var(--o-ink)" stroke-width="7" stroke-linejoin="round"/>
+        <!-- body silhouette (same path as #bodyClip) -->
+        <path d="M86,228 C82,190 86,158 98,132 C94,110 88,78 82,42 C108,60 132,88 150,112 C166,106 184,104 200,104 C216,104 234,106 250,112 C268,88 292,60 318,42 C312,78 306,110 302,132 C314,158 318,190 314,228 C326,288 322,352 290,395 C258,424 142,424 110,395 C78,352 74,288 86,228 Z"
+              fill="url(#bodyGrad)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
 
-        <!-- chest: colonnade plate + chevrons -->
-        <g clip-path="url(#bodyClip)">
-          <path d="M122,262 L278,262 L278,300 L200,352 L122,300 Z" fill="var(--o-pale)" stroke="var(--o-ink)" stroke-width="5" stroke-linejoin="round"/>
-          <g stroke="var(--o-ink)" stroke-width="5">
-            <path d="M161,264 V326 M200,264 V350 M239,264 V326"/>
+        <!-- ear tuft feathers; outside #head because the tufts don't turn -->
+        <path d="M89,62 C104,76 122,94 136,110 L106,124 C104,102 98,82 89,62 Z" fill="var(--o-navy)"/>
+        <path d="M311,62 C296,76 278,94 264,110 L294,124 C296,102 302,82 311,62 Z" fill="var(--o-deep)"/>
+        <path d="M97,84 C101,96 103,106 105,116 M303,84 C299,96 297,106 295,116" stroke="var(--o-light)" stroke-width="4" stroke-linecap="round" fill="none"/>
+
+        <!-- chest: colonnade under an architrave, then layered chevrons -->
+        <g clip-path="url(#bodyClip)" stroke="var(--o-ink)" stroke-width="4" stroke-linejoin="round">
+          <g stroke="none">
+            <rect x="121" y="276" width="24" height="74" fill="var(--o-pale)"/>
+            <rect x="155" y="276" width="24" height="94" fill="var(--o-pale)"/>
+            <rect x="189" y="276" width="22" height="114" fill="var(--o-pale)"/>
+            <rect x="200" y="276" width="11" height="114" fill="var(--o-frost)"/>
+            <rect x="221" y="276" width="24" height="94" fill="var(--o-frost)"/>
+            <rect x="255" y="276" width="24" height="74" fill="var(--o-frost)"/>
           </g>
-          <path d="M200,352 L278,300 L278,262 L200,262 Z" fill="#BFDBFE" opacity=".6"/>
-          <path d="M80,302 L200,380 L320,302 L320,338 L200,420 L80,338 Z" fill="var(--o-navy)" stroke="var(--o-ink)" stroke-width="5" stroke-linejoin="round"/>
-          <path d="M200,380 L320,302 L320,338 L200,420 Z" fill="#172E6E"/>
+          <path d="M100,264 H300 V278 H100 Z" fill="var(--o-pale)"/>
+          <path d="M70,298 L200,372 L330,298 L330,338 L200,412 L70,338 Z" fill="var(--o-navy)"/>
+          <path d="M200,372 L330,298 L330,338 L200,412 Z" fill="var(--o-deep)" stroke="none"/>
+          <path d="M70,298 L200,372 L330,298" fill="none"/>
+          <path d="M70,318 L200,392 L330,318" fill="none" stroke="var(--o-blue)"/>
         </g>
 
         <!-- head -->
         <g id="head">
-          <!-- ear tuft inner feathers -->
-          <path d="M84,66 C106,80 126,96 142,112 L110,124 C106,104 98,84 84,66 Z" fill="var(--o-navy)"/>
-          <path d="M316,66 C294,80 274,96 258,112 L290,124 C294,104 302,84 316,66 Z" fill="var(--o-navy)"/>
-          <path d="M96,80 C104,94 110,106 114,118 M306,80 C296,94 290,106 286,118" stroke="var(--o-light)" stroke-width="4" stroke-linecap="round" fill="none"/>
           <!-- forehead chevrons -->
-          <path d="M180,122 L200,142 L220,122" fill="none" stroke="var(--o-navy)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M188,138 L200,150 L212,138" fill="none" stroke="var(--o-light)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M182,124 L200,142 L218,124" fill="none" stroke="var(--o-navy)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M189,138 L200,149 L211,138" fill="none" stroke="var(--o-light)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
 
-          <!-- brows / ear tufts -->
-          <path d="M200,176 C178,146 144,126 100,114 C112,136 128,150 148,158 C170,166 188,172 200,188 Z"
-                fill="var(--o-pale)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-          <path d="M200,176 C222,146 256,126 300,114 C288,136 272,150 252,158 C230,166 212,172 200,188 Z"
+          <!-- brows sweeping up toward the tufts -->
+          <path d="M200,178 C178,150 148,134 114,126 C123,143 136,154 153,160 C173,166 188,174 200,190 Z"
                 fill="var(--o-white)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
+          <path d="M200,178 C222,150 252,134 286,126 C277,143 264,154 247,160 C227,166 212,174 200,190 Z"
+                fill="var(--o-pale)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
 
           <!-- facial disc -->
-          <path d="M200,186 C182,160 124,150 104,190 C96,232 128,258 168,252 L200,272 L232,252 C272,258 304,232 296,190 C276,150 218,160 200,186 Z"
+          <path d="M200,188 C180,160 126,152 106,190 C98,230 128,256 166,252 L200,274 L234,252 C272,256 302,230 294,190 C274,152 220,160 200,188 Z"
                 fill="var(--o-light)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-          <path d="M200,186 L200,272 L232,252 C272,258 304,232 296,190 C276,150 218,160 200,186 Z" fill="#BFDBFE" opacity=".55"/>
+          <path d="M200,191 L200,270 L233,249 C270,253 299,229 291,191 C272,156 222,163 200,191 Z" fill="var(--o-mid)" opacity=".22"/>
 
           <!-- eyes -->
           <g class="eye" data-cx="152" data-cy="192">
@@ -172,10 +209,10 @@
             <g clip-path="url(#eyeClipL)">
               <g class="pupil">
                 <circle cx="152" cy="192" r="27" fill="var(--o-ink)"/>
-                <circle cx="143" cy="182" r="7.5" fill="#fff"/>
-                <circle cx="161" cy="202" r="2.5" fill="#fff" opacity=".7"/>
+                <circle cx="143" cy="182" r="7.5" fill="var(--o-white)"/>
+                <circle cx="161" cy="202" r="2.5" fill="var(--o-white)" opacity=".7"/>
               </g>
-              <ellipse class="lid" cx="152" cy="171" rx="46" ry="46" fill="var(--o-mid)" stroke="var(--o-ink)" stroke-width="5"/>
+              <ellipse class="lid" cx="152" cy="192" rx="50" ry="48" fill="var(--o-mid)" stroke="var(--o-ink)" stroke-width="4"/>
             </g>
           </g>
           <g class="eye" data-cx="248" data-cy="192">
@@ -183,41 +220,27 @@
             <g clip-path="url(#eyeClipR)">
               <g class="pupil">
                 <circle cx="248" cy="192" r="27" fill="var(--o-ink)"/>
-                <circle cx="239" cy="182" r="7.5" fill="#fff"/>
-                <circle cx="257" cy="202" r="2.5" fill="#fff" opacity=".7"/>
+                <circle cx="239" cy="182" r="7.5" fill="var(--o-white)"/>
+                <circle cx="257" cy="202" r="2.5" fill="var(--o-white)" opacity=".7"/>
               </g>
-              <ellipse class="lid" cx="248" cy="171" rx="46" ry="46" fill="var(--o-mid)" stroke="var(--o-ink)" stroke-width="5"/>
+              <ellipse class="lid" cx="248" cy="192" rx="50" ry="48" fill="var(--o-mid)" stroke="var(--o-ink)" stroke-width="4"/>
             </g>
           </g>
 
           <!-- beak -->
-          <path d="M200,212 L216,236 L200,270 L184,236 Z" fill="var(--o-blue)" stroke="var(--o-ink)" stroke-width="5" stroke-linejoin="round"/>
-          <path d="M200,212 L216,236 L200,270 Z" fill="var(--o-navy)"/>
+          <path d="M200,212 L216,236 L200,270 L184,236 Z" fill="var(--o-blue)" stroke="var(--o-ink)" stroke-width="4" stroke-linejoin="round"/>
+          <path d="M200,214 L214,236 L200,266 Z" fill="var(--o-navy)"/>
         </g>
       </g>
 
-      <!-- wings (drawn over body sides; pivot at shoulders) -->
+      <!-- wings (drawn over body sides; pivot at the shoulder caps) -->
       <g id="wing-l" class="wing">
-        <path d="M106,232 C78,256 66,320 76,372 C82,398 104,414 128,404 C132,350 130,288 106,232 Z"
-              fill="url(#wingGrad)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-        <g stroke="var(--o-light)" stroke-width="6" stroke-linecap="round">
-          <path d="M90,300 V372 M106,290 V392 M120,310 V396"/>
-        </g>
+        <use href="#owl-wing" fill="url(#wingGrad)"/>
       </g>
       <g id="wing-r" class="wing">
-        <path d="M294,232 C322,256 334,320 324,372 C318,398 296,414 272,404 C268,350 270,288 294,232 Z"
-              fill="url(#wingGrad)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-        <g stroke="var(--o-light)" stroke-width="6" stroke-linecap="round">
-          <path d="M310,300 V372 M294,290 V392 M280,310 V396"/>
-        </g>
+        <use href="#owl-wing" fill="url(#wingGradShade)" transform="matrix(-1 0 0 1 400 0)"/>
       </g>
 
-      <!-- talons gripping branch -->
-      <g fill="var(--o-pale)" stroke="var(--o-ink)" stroke-width="4">
-        <rect x="160" y="398" width="12" height="24" rx="6"/>
-        <rect x="175" y="400" width="12" height="24" rx="6"/>
-        <rect x="213" y="400" width="12" height="24" rx="6"/>
-        <rect x="228" y="398" width="12" height="24" rx="6"/>
       </g>
     </g>
     </g>

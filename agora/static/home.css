@@ -3,10 +3,13 @@
 :root {
   /* owl palette */
   --o-ink: #0B1224;
+  --o-deep: #172E6E;
   --o-navy: #1E3A8A;
   --o-blue: #2563EB;
   --o-mid: #3B82F6;
+  --o-sky: #60A5FA;
   --o-light: #93C5FD;
+  --o-frost: #BFDBFE;
   --o-pale: #DBEAFE;
   --o-white: #F8FBFF;
   --serif: "Fraunces", Georgia, serif;
@@ -196,8 +199,8 @@ body.home .main { padding: 0; }
 #owl { cursor: pointer; }
 #owl-body { transform-box: fill-box; transform-origin: 50% 100%; }
 .wing { transform-box: view-box; }
-#wing-l { transform-origin: 106px 232px; }
-#wing-r { transform-origin: 294px 232px; }
+#wing-l { transform-origin: 102px 244px; }
+#wing-r { transform-origin: 298px 244px; }
 #head { transform-origin: 200px 250px; transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .lid { transform-box: fill-box; transform-origin: 50% 0%; transform: scaleY(0); }
 .blink .lid { animation: owl-blink 0.18s ease-in-out; }
