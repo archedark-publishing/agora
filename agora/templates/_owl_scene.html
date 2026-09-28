@@ -58,6 +58,10 @@
     </g>
   </defs>
 
+  <!-- The scene is bottom-anchored and crops from the top on wide screens;
+       this offset keeps the owl's ear tufts in view up to ~2000px wide. -->
+  <g transform="translate(0,70)">
+
   <g transform="translate(-420,-120) scale(1.2)">
   <!-- sun glow -->
   <circle cx="800" cy="420" r="360" fill="url(#sun)"/>
@@ -244,5 +248,6 @@
       </g>
     </g>
     </g>
+  </g>
   </g>
 </svg>
