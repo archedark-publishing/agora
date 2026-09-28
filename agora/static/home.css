@@ -199,8 +199,8 @@ body.home .main { padding: 0; }
 #owl { cursor: pointer; }
 #owl-body { transform-box: fill-box; transform-origin: 50% 100%; }
 .wing { transform-box: view-box; }
-#wing-l { transform-origin: 102px 244px; }
-#wing-r { transform-origin: 298px 244px; }
+#wing-l { transform-origin: 84px 248px; }
+#wing-r { transform-origin: 316px 248px; }
 #head { transform-origin: 200px 250px; transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .lid { transform-box: fill-box; transform-origin: 50% 0%; transform: scaleY(0); }
 .blink .lid { animation: owl-blink 0.18s ease-in-out; }
@@ -225,7 +225,7 @@ body.home .main { padding: 0; }
   100% { transform: scale(1, 1); }
 }
 .idle #owl-body { animation: owl-breathe 4.2s ease-in-out infinite; }
-@keyframes owl-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.012, 1.018); } }
+@keyframes owl-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.004, 1.007); } }
 .ruffle #wing-l { animation: owl-ruffle-l 0.9s ease-in-out; }
 .ruffle #wing-r { animation: owl-ruffle-r 0.9s ease-in-out; }
 @keyframes owl-ruffle-l {
@@ -241,16 +241,31 @@ body.home .main { padding: 0; }
   60% { transform: rotate(-14deg); }
 }
 .leaf-sway {
-  transform-box: fill-box;
-  transform-origin: 0% 50%;
+  transform-box: view-box; /* transform-origin is set per leaf, at its stem */
   animation: leaf-sway 5s ease-in-out infinite;
 }
-@keyframes leaf-sway { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(3deg); } }
+@keyframes leaf-sway { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(4deg); } }
 
 /* happy: after "Copy prompt" the owl closes its eyes in a "^ ^", hops with a flap, and sparkles */
 .smile { opacity: 0; transition: opacity 0.12s; }
 .happy .smile { opacity: 1; }
 .spark { transform-box: fill-box; transform-origin: 50% 50%; opacity: 0; }
+/* the branch shadow shrinks and fades while the owl is in the air */
+#owl-shadow { transform-box: fill-box; transform-origin: 50% 50%; animation: shadow-land 1.9s cubic-bezier(0.25, 0.8, 0.3, 1) both; }
+@keyframes shadow-land {
+  0% { opacity: 0; transform: scale(0.4); }
+  70% { opacity: 0.1; transform: scale(0.95); }
+  100% { opacity: 0.12; transform: scale(1); }
+}
+/* keep shadow-land in the list so it isn't restarted when .hop is added or removed */
+#owl-shadow.hop {
+  animation: shadow-land 1.9s cubic-bezier(0.25, 0.8, 0.3, 1) both, shadow-hop 0.9s cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+@keyframes shadow-hop {
+  0%, 55%, 86%, 100% { opacity: 0.12; transform: scale(1); }
+  30% { opacity: 0.04; transform: scale(0.72); }
+  72% { opacity: 0.08; transform: scale(0.88); }
+}
 #owl.happy { animation: owl-hop 0.9s cubic-bezier(0.3, 0.7, 0.4, 1); }
 @keyframes owl-hop {
   0%, 100% { transform: translateY(0); }
@@ -272,7 +287,7 @@ body.home .main { padding: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   #owl-fly, .flapping .wing, .idle #owl-body, .leaf-sway, .settle #owl-body, .ruffle .wing,
-  #owl.happy, #owl.happy .wing, #owl.happy .spark {
+  #owl.happy, #owl.happy .wing, #owl.happy .spark, #owl-shadow, #owl-shadow.hop {
     animation: none !important;
   }
 }

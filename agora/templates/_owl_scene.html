@@ -116,29 +116,23 @@
     <path d="M-60,618 C60,624 180,634 300,642 C420,650 540,662 680,684 C706,688 728,694 750,702 C724,700 700,700 676,698 C540,690 420,680 300,674 C180,668 60,664 -60,660 Z" fill="url(#bark)"/>
     <!-- twig -->
     <path d="M560,670 C590,648 610,636 640,628 C616,646 596,660 574,678 Z" fill="#3B2F24"/>
-    <!-- olive leaves -->
-    <g class="leaf-sway">
-      <path d="M640,628 C660,610 686,606 706,612 C688,626 662,632 640,628 Z" fill="#7C9A74"/>
-      <path d="M624,636 C628,614 642,598 662,590 C656,610 642,628 624,636 Z" fill="#6B8A64"/>
-    </g>
-    <g class="leaf-sway" style="animation-delay:-1.8s">
-      <path d="M700,694 C720,706 736,724 742,744 C722,736 706,718 700,694 Z" fill="#7C9A74"/>
-      <path d="M672,694 C682,716 684,740 678,758 C666,740 664,716 672,694 Z" fill="#6B8A64"/>
-    </g>
-    <g class="leaf-sway" style="animation-delay:-3s">
-      <path d="M90,630 C96,606 112,592 134,588 C126,610 110,626 90,630 Z" fill="#6B8A64"/>
-      <path d="M60,662 C66,686 62,708 50,724 C42,704 46,682 60,662 Z" fill="#7C9A74"/>
-      <path d="M150,640 C170,626 194,624 212,632 C194,644 170,648 150,640 Z" fill="#8AA882"/>
-    </g>
+    <!-- olive leaves: each sways around the point where it joins the branch -->
+    <g class="leaf-sway" style="transform-origin:640px 628px; animation-delay:0s"><path d="M640,628 C660,610 686,606 706,612 C688,626 662,632 640,628 Z" fill="#7C9A74"/></g>
+    <g class="leaf-sway" style="transform-origin:624px 636px; animation-delay:-1.1s"><path d="M624,636 C628,614 642,598 662,590 C656,610 642,628 624,636 Z" fill="#6B8A64"/></g>
+    <g class="leaf-sway" style="transform-origin:700px 694px; animation-delay:-2.3s"><path d="M700,694 C720,706 736,724 742,744 C722,736 706,718 700,694 Z" fill="#7C9A74"/></g>
+    <g class="leaf-sway" style="transform-origin:672px 694px; animation-delay:-3.4s"><path d="M672,694 C682,716 684,740 678,758 C666,740 664,716 672,694 Z" fill="#6B8A64"/></g>
+    <g class="leaf-sway" style="transform-origin:90px 630px; animation-delay:-0.6s"><path d="M90,630 C96,606 112,592 134,588 C126,610 110,626 90,630 Z" fill="#6B8A64"/></g>
+    <g class="leaf-sway" style="transform-origin:60px 662px; animation-delay:-2.9s"><path d="M60,662 C66,686 62,708 50,724 C42,704 46,682 60,662 Z" fill="#7C9A74"/></g>
+    <g class="leaf-sway" style="transform-origin:150px 640px; animation-delay:-1.7s"><path d="M150,640 C170,626 194,624 212,632 C194,644 170,648 150,640 Z" fill="#8AA882"/></g>
   </g>
 
   <!-- ===== OWL ===== low-poly origami style. owl-local coords: 400 x 440, feet at y≈417.
        Facets are mirrored left to right, with the right half one shade darker. -->
   <g transform="translate(150,128) scale(1.25)">
+    <!-- contact shadow: fixed to the branch, fades as the owl lifts off -->
+    <ellipse id="owl-shadow" cx="200" cy="421" rx="78" ry="6" fill="var(--o-ink)" opacity=".12"/>
     <g id="owl-fly">
     <g id="owl" class="flapping">
-      <!-- soft contact shadow on branch -->
-      <ellipse cx="200" cy="421" rx="78" ry="6" fill="var(--o-ink)" opacity=".12"/>
 
       <!-- talons: pale toes with ink claws, behind the belly -->
       <g id="feet">
@@ -193,8 +187,8 @@
         <polygon points="268,348 200,318 242,402" fill="var(--o-sky)"/>
         <polygon points="200,318 200,420 242,402" fill="var(--o-light)"/>
         <!-- chevron band -->
-        <polygon points="70,330 200,400 330,330 330,350 200,424 70,350" fill="var(--o-navy)" clip-path="url(#bodyClip)"/>
-        <polygon points="200,400 330,330 330,350 200,424" fill="var(--o-deep)" clip-path="url(#bodyClip)"/>
+        <polygon points="70,350 200,404 330,350 330,380 200,430 70,380" fill="var(--o-navy)" clip-path="url(#bodyClip)"/>
+        <polygon points="200,404 330,350 330,380 200,430" fill="var(--o-deep)" clip-path="url(#bodyClip)"/>
 
         <g id="head">
           <!-- facial disc and brows -->
@@ -248,9 +242,9 @@
         </g>
       </g>
 
-      <!-- wings pivot on their shoulder points (102,244) / (298,244) -->
-      <g id="wing-l" class="wing"><use href="#owl-wing-l"/></g>
-      <g id="wing-r" class="wing"><use href="#owl-wing-r"/></g>
+      <!-- wings pivot on their shoulder points (84,248) / (316,248) -->
+      <g id="wing-l" class="wing"><use href="#owl-wing-l" transform="translate(-18,4)"/></g>
+      <g id="wing-r" class="wing"><use href="#owl-wing-r" transform="translate(18,4)"/></g>
 
       <!-- sparkles for the happy animation (hidden until #owl.happy) -->
       <g id="owl-joy">

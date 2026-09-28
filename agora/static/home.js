@@ -93,13 +93,19 @@
   setTimeout(blink, 2400);
 
   // --- happy squint (plus a hop, flap and sparkles) when the prompt is copied ---
+  const shadow = document.getElementById("owl-shadow");
   let happyTimer;
   owl.addEventListener("owl:happy", () => {
     owl.classList.remove("happy", "ruffle");
+    shadow?.classList.remove("hop");
     owl.getBoundingClientRect(); // restart the animations on repeat clicks
     owl.classList.add("happy");
+    shadow?.classList.add("hop");
     clearTimeout(happyTimer);
-    happyTimer = setTimeout(() => owl.classList.remove("happy"), 1400);
+    happyTimer = setTimeout(() => {
+      owl.classList.remove("happy");
+      shadow?.classList.remove("hop");
+    }, 1400);
   });
 
   if (reduceMotion) return;
