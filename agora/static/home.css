@@ -247,8 +247,32 @@ body.home .main { padding: 0; }
 }
 @keyframes leaf-sway { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(3deg); } }
 
+/* happy: after "Copy prompt" the owl closes its eyes in a "^ ^", hops with a flap, and sparkles */
+.smile { opacity: 0; transition: opacity 0.12s; }
+.happy .smile { opacity: 1; }
+.spark { transform-box: fill-box; transform-origin: 50% 50%; opacity: 0; }
+#owl.happy { animation: owl-hop 0.9s cubic-bezier(0.3, 0.7, 0.4, 1); }
+@keyframes owl-hop {
+  0%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-34px); }
+  55% { transform: translateY(0); }
+  72% { transform: translateY(-12px); }
+  86% { transform: translateY(0); }
+}
+#owl.happy #wing-l { animation: owl-flap-l 0.15s ease-in-out 4 alternate; }
+#owl.happy #wing-r { animation: owl-flap-r 0.15s ease-in-out 4 alternate; }
+#owl.happy .spark { animation: owl-spark 0.9s ease-out both; }
+#owl.happy #owl-joy > g:nth-child(2n) .spark { animation-delay: 0.12s; }
+#owl.happy #owl-joy > g:nth-child(3n) .spark { animation-delay: 0.24s; }
+@keyframes owl-spark {
+  0% { opacity: 0; transform: translateY(12px) scale(0.2) rotate(0); }
+  35% { opacity: 1; transform: translateY(-6px) scale(1.15) rotate(20deg); }
+  100% { opacity: 0; transform: translateY(-26px) scale(0.6) rotate(45deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  #owl-fly, .flapping .wing, .idle #owl-body, .leaf-sway, .settle #owl-body, .ruffle .wing {
+  #owl-fly, .flapping .wing, .idle #owl-body, .leaf-sway, .settle #owl-body, .ruffle .wing,
+  #owl.happy, #owl.happy .wing, #owl.happy .spark {
     animation: none !important;
   }
 }

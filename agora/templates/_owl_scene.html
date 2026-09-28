@@ -218,6 +218,11 @@
                 <polygon points="140,178 150,176 144,186" fill="var(--o-white)"/>
               </g>
               <ellipse class="lid" cx="152" cy="192" rx="50" ry="48" fill="var(--o-blue)"/>
+              <!-- happy "^" eye, shown while #owl.happy -->
+              <g class="smile">
+                <circle cx="152" cy="192" r="44" fill="var(--o-sky)"/>
+                <path d="M128,204 L152,180 L176,204" fill="none" stroke="var(--o-ink)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+              </g>
             </g>
           </g>
           <g class="eye" data-cx="248" data-cy="192">
@@ -229,6 +234,11 @@
                 <polygon points="236,178 246,176 240,186" fill="var(--o-white)"/>
               </g>
               <ellipse class="lid" cx="248" cy="192" rx="50" ry="48" fill="var(--o-blue)"/>
+              <!-- happy "^" eye, shown while #owl.happy -->
+              <g class="smile">
+                <circle cx="248" cy="192" r="44" fill="var(--o-sky)"/>
+                <path d="M224,204 L248,180 L272,204" fill="none" stroke="var(--o-ink)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+              </g>
             </g>
           </g>
 
@@ -242,6 +252,15 @@
       <g id="wing-l" class="wing"><use href="#owl-wing-l"/></g>
       <g id="wing-r" class="wing"><use href="#owl-wing-r"/></g>
 
+      <!-- sparkles for the happy animation (hidden until #owl.happy) -->
+      <g id="owl-joy">
+        <g transform="translate(52,150)"><path class="spark" d="M0,-16 L5,0 L0,16 L-5,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(356,138)"><path class="spark" d="M0,-20 L6,0 L0,20 L-6,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(26,256)"><path class="spark" d="M0,-12 L4,0 L0,12 L-4,0 Z" fill="var(--o-blue)"/></g>
+        <g transform="translate(378,262)"><path class="spark" d="M0,-14 L4,0 L0,14 L-4,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(118,40)"><path class="spark" d="M0,-12 L4,0 L0,12 L-4,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(286,30)"><path class="spark" d="M0,-14 L4,0 L0,14 L-4,0 Z" fill="var(--o-blue)"/></g>
+      </g>
     </g>
     </g>
   </g>

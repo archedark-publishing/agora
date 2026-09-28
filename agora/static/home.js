@@ -23,6 +23,7 @@
         return;
       }
       copyBtn.classList.add("done");
+      document.getElementById("owl")?.dispatchEvent(new CustomEvent("owl:happy"));
       label.textContent = "Copied!";
       setTimeout(() => {
         copyBtn.classList.remove("done");
@@ -90,6 +91,16 @@
     setTimeout(blink, 2500 + Math.random() * 4000);
   }
   setTimeout(blink, 2400);
+
+  // --- happy squint (plus a hop, flap and sparkles) when the prompt is copied ---
+  let happyTimer;
+  owl.addEventListener("owl:happy", () => {
+    owl.classList.remove("happy", "ruffle");
+    owl.getBoundingClientRect(); // restart the animations on repeat clicks
+    owl.classList.add("happy");
+    clearTimeout(happyTimer);
+    happyTimer = setTimeout(() => owl.classList.remove("happy"), 1400);
+  });
 
   if (reduceMotion) return;
 
