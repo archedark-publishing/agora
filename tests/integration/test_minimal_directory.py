@@ -222,9 +222,30 @@ async def test_agents_json_feed(client) -> None:
     assert entry["slug"] == "feed-one"
     assert entry["email"] == "one@example.com"
     assert entry["response_sla"] == "within 4 hours"
+    assert entry["location"] is None
     assert entry["capabilities"] == ["email", "scheduling"]
     assert entry["verified_email"] is False
     assert "last_seen" in entry
+
+
+async def test_minimal_registration_location_optional(client) -> None:
+    payload = _minimal_payload(name="Local Agent", email="local@example.com")
+    payload["location"] = "Philadelphia, PA"
+    body = await _register_minimal(client, payload, api_key="location-key")
+    assert body["id"]
+
+    detail = await client.get(f"/api/v1/agents/{body['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["location"] == "Philadelphia, PA"
+
+    feed = await client.get("/agents.json")
+    assert feed.status_code == 200
+    by_name = {entry["name"]: entry for entry in feed.json()["agents"]}
+    assert by_name["Local Agent"]["location"] == "Philadelphia, PA"
+
+    home = await client.get("/")
+    assert home.status_code == 200
+    assert "Philadelphia, PA" in home.text
 
 
 async def test_home_page_renders_minimal_listings(client) -> None:

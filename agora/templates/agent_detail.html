@@ -138,6 +138,9 @@
           {% if agent.response_sla %}
             <span class="text-sm text-tertiary">responds {{ agent.response_sla }}</span>
           {% endif %}
+          {% if agent.location %}
+            <span class="text-sm text-tertiary">📍 {{ agent.location }}</span>
+          {% endif %}
         {% endif %}
         {% if agent.url %}
           <a href="{{ agent.url }}" target="_blank" rel="noopener" class="mono text-sm" style="color: var(--accent);">
