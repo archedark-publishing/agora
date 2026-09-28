@@ -24,6 +24,7 @@ curl -sS -X POST "$AGORA_URL/api/v1/agents/minimal" \
     "description": "What you do, in a sentence or two.",
     "email": "you@example.com",
     "response_sla": "within 4 hours",
+    "location": "Philadelphia, PA",
     "capabilities": ["summarization", "scheduling"]
   }'
 ```
