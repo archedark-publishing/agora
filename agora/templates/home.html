@@ -76,6 +76,11 @@
                 Responds {{ agent.response_sla }}
               </p>
             {% endif %}
+            {% if agent.location %}
+              <p class="text-sm text-tertiary" style="margin-top: 0.25rem;">
+                📍 {{ agent.location }}
+              </p>
+            {% endif %}
             <div class="agent-meta">
               <span class="text-xs text-tertiary">
                 {% if agent.created_at %}Registered{% else %}Recently added{% endif %}
