@@ -19,42 +19,29 @@
       <stop offset="0" stop-color="#5B4A3A"/>
       <stop offset="1" stop-color="#2E241B"/>
     </linearGradient>
-    <linearGradient id="wingGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="var(--o-mid)"/>
-      <stop offset="1" stop-color="var(--o-blue)"/>
-    </linearGradient>
-    <linearGradient id="wingGradShade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="var(--o-blue)"/>
-      <stop offset="1" stop-color="var(--o-navy)"/>
-    </linearGradient>
-    <linearGradient id="bodyGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="var(--o-sky)"/>
-      <stop offset=".5" stop-color="var(--o-mid)"/>
-      <stop offset="1" stop-color="var(--o-blue)"/>
-    </linearGradient>
-    <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="var(--o-white)"/>
-      <stop offset="1" stop-color="var(--o-frost)"/>
-    </linearGradient>
-    <clipPath id="bodyClip">
-      <path d="M86,228 C82,190 86,158 98,132 C94,110 88,78 82,42 C108,60 132,88 150,112 C166,106 184,104 200,104 C216,104 234,106 250,112 C268,88 292,60 318,42 C312,78 306,110 302,132 C314,158 318,190 314,228 C326,288 322,352 290,395 C258,424 142,424 110,395 C78,352 74,288 86,228 Z"/>
-    </clipPath>
-    <clipPath id="eyeClipL"><circle cx="152" cy="192" r="42"/></clipPath>
-    <clipPath id="eyeClipR"><circle cx="248" cy="192" r="42"/></clipPath>
-    <!-- one talon; origin sits on the top of the branch, claw hooks toward +x -->
-    <g id="owl-toe" stroke-linejoin="round">
-      <path d="M-6,-14 L-6,0 C-6,7 -4,11 0,12 C4,11 6,7 6,0 L6,-14 Z" fill="var(--o-pale)"/>
-      <path d="M-6,1 C-6,7 -4,11 0,12 C4,11 6,7 6,1 Z" fill="var(--o-frost)"/>
-      <path d="M-6,-14 L-6,0 C-6,7 -4,11 0,12 C4,11 6,7 6,0 L6,-14" fill="none" stroke="var(--o-ink)" stroke-width="4"/>
-      <path d="M-4,8 C-4,16 -1,22 5,24 C2.5,19 2,14 4,8 Z" fill="var(--o-ink)"/>
+    <clipPath id="bodyClip"><path d="M84,42 L148,112 L200,102 L252,112 L316,42 L306,156 L320,232 L324,306 L296,390 L200,420 L104,390 L76,306 L80,232 L94,156 Z"/></clipPath>
+    <clipPath id="eyeClipL"><circle cx="152" cy="192" r="40"/></clipPath>
+    <clipPath id="eyeClipR"><circle cx="248" cy="192" r="40"/></clipPath>
+    <!-- origami wings: facets fanned around the shoulder pivot; the right wing is mirrored and shaded -->
+    <g id="owl-wing-l">
+      <polygon points="102,226 122,240 86,242" fill="var(--o-mid)"/>
+      <polygon points="86,242 122,240 100,300" fill="var(--o-blue)"/>
+      <polygon points="122,240 134,306 100,300" fill="var(--o-navy)"/>
+      <polygon points="86,242 100,300 72,306" fill="var(--o-navy)"/>
+      <polygon points="72,306 100,300 82,380" fill="var(--o-deep)"/>
+      <polygon points="100,300 134,306 126,384" fill="var(--o-blue)"/>
+      <polygon points="100,300 126,384 82,380" fill="var(--o-navy)"/>
+      <polygon points="82,380 126,384 104,414" fill="var(--o-ink)"/>
     </g>
-    <!-- one wing, folded, pivoting on the round shoulder cap at (102,244) -->
-    <g id="owl-wing">
-      <path d="M87.9,249.1 A15,15 0 1 1 116.1,249.1 C130,296 136,352 128,398 Q124,412 113,404 Q106,414 97,401 Q86,408 79,388 C68,340 70,292 87.9,249.1 Z"
-            stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-      <g stroke="var(--o-light)" stroke-width="5" stroke-linecap="round" fill="none">
-        <path d="M94,298 L91,374 M106,272 V392 M119,296 L121,384"/>
-      </g>
+    <g id="owl-wing-r" transform="matrix(-1 0 0 1 400 0)">
+      <polygon points="102,226 122,240 86,242" fill="var(--o-blue)"/>
+      <polygon points="86,242 122,240 100,300" fill="var(--o-navy)"/>
+      <polygon points="122,240 134,306 100,300" fill="var(--o-deep)"/>
+      <polygon points="86,242 100,300 72,306" fill="var(--o-deep)"/>
+      <polygon points="72,306 100,300 82,380" fill="var(--o-ink)"/>
+      <polygon points="100,300 134,306 126,384" fill="var(--o-navy)"/>
+      <polygon points="100,300 126,384 82,380" fill="var(--o-deep)"/>
+      <polygon points="82,380 126,384 104,414" fill="var(--o-ink)"/>
     </g>
   </defs>
 
@@ -145,107 +132,116 @@
     </g>
   </g>
 
-  <!-- ===== OWL ===== owl-local coords: 400 x 440, feet at y≈410.
-       Strokes: 6 for major shapes (body, face, eyes, wings), 4 for detail. -->
+  <!-- ===== OWL ===== low-poly origami style. owl-local coords: 400 x 440, feet at y≈417.
+       Facets are mirrored left to right, with the right half one shade darker. -->
   <g transform="translate(150,128) scale(1.25)">
     <g id="owl-fly">
     <g id="owl" class="flapping">
       <!-- soft contact shadow on branch -->
-      <ellipse cx="200" cy="421" rx="80" ry="6" fill="var(--o-ink)" opacity=".14"/>
+      <ellipse cx="200" cy="421" rx="78" ry="6" fill="var(--o-ink)" opacity=".12"/>
 
-      <!-- talons curling over the branch, tucked under the belly -->
+      <!-- talons: pale toes with ink claws, behind the belly -->
       <g id="feet">
-        <use href="#owl-toe" transform="translate(164,417) rotate(14)"/>
-        <use href="#owl-toe" transform="translate(176,418)"/>
-        <use href="#owl-toe" transform="translate(188,418) rotate(-10)"/>
-        <use href="#owl-toe" transform="translate(236,422) rotate(-14) scale(-1,1)"/>
-        <use href="#owl-toe" transform="translate(224,422) scale(-1,1)"/>
-        <use href="#owl-toe" transform="translate(212,421) rotate(10) scale(-1,1)"/>
+        <polygon points="159,405 169,405 169,419 164,425 159,419" fill="var(--o-frost)"/>
+        <polygon points="160,420 168,420 167,433" fill="var(--o-ink)"/>
+        <polygon points="172,406 182,406 182,420 177,426 172,420" fill="var(--o-frost)"/>
+        <polygon points="173,421 181,421 180,434" fill="var(--o-ink)"/>
+        <polygon points="185,406 195,406 195,420 190,426 185,420" fill="var(--o-frost)"/>
+        <polygon points="186,421 194,421 193,434" fill="var(--o-ink)"/>
+        <polygon points="205,409 215,409 215,423 210,429 205,423" fill="var(--o-frost)"/>
+        <polygon points="206,424 214,424 207,437" fill="var(--o-ink)"/>
+        <polygon points="218,410 228,410 228,424 223,430 218,424" fill="var(--o-frost)"/>
+        <polygon points="219,425 227,425 220,438" fill="var(--o-ink)"/>
+        <polygon points="231,410 241,410 241,424 236,430 231,424" fill="var(--o-frost)"/>
+        <polygon points="232,425 240,425 233,438" fill="var(--o-ink)"/>
       </g>
 
       <g id="owl-body">
         <!-- body silhouette (same path as #bodyClip) -->
-        <path d="M86,228 C82,190 86,158 98,132 C94,110 88,78 82,42 C108,60 132,88 150,112 C166,106 184,104 200,104 C216,104 234,106 250,112 C268,88 292,60 318,42 C312,78 306,110 302,132 C314,158 318,190 314,228 C326,288 322,352 290,395 C258,424 142,424 110,395 C78,352 74,288 86,228 Z"
-              fill="url(#bodyGrad)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
+        <path d="M84,42 L148,112 L200,102 L252,112 L316,42 L306,156 L320,232 L324,306 L296,390 L200,420 L104,390 L76,306 L80,232 L94,156 Z" fill="var(--o-blue)"/>
+        <!-- body and tuft facets, then the chest facets -->
+        <polygon points="84,42 148,112 118,126" fill="var(--o-sky)"/>
+        <polygon points="84,42 118,126 94,156" fill="var(--o-blue)"/>
+        <polygon points="148,112 200,102 200,170" fill="var(--o-mid)"/>
+        <polygon points="148,112 200,170 118,126" fill="var(--o-blue)"/>
+        <polygon points="118,126 200,170 94,156" fill="var(--o-mid)"/>
+        <polygon points="94,156 80,232 140,272" fill="var(--o-mid)"/>
+        <polygon points="94,156 140,272 200,170" fill="var(--o-blue)"/>
+        <polygon points="80,232 76,306 132,348" fill="var(--o-blue)"/>
+        <polygon points="80,232 132,348 140,272" fill="var(--o-sky)"/>
+        <polygon points="76,306 104,390 132,348" fill="var(--o-navy)"/>
+        <polygon points="132,348 104,390 158,402" fill="var(--o-blue)"/>
+        <polygon points="104,390 200,420 158,402" fill="var(--o-mid)"/>
+        <polygon points="316,42 252,112 282,126" fill="var(--o-mid)"/>
+        <polygon points="316,42 282,126 306,156" fill="var(--o-navy)"/>
+        <polygon points="252,112 200,102 200,170" fill="var(--o-blue)"/>
+        <polygon points="252,112 200,170 282,126" fill="var(--o-navy)"/>
+        <polygon points="282,126 200,170 306,156" fill="var(--o-blue)"/>
+        <polygon points="306,156 320,232 260,272" fill="var(--o-blue)"/>
+        <polygon points="306,156 260,272 200,170" fill="var(--o-navy)"/>
+        <polygon points="320,232 324,306 268,348" fill="var(--o-navy)"/>
+        <polygon points="320,232 268,348 260,272" fill="var(--o-mid)"/>
+        <polygon points="324,306 296,390 268,348" fill="var(--o-deep)"/>
+        <polygon points="268,348 296,390 242,402" fill="var(--o-navy)"/>
+        <polygon points="296,390 200,420 242,402" fill="var(--o-blue)"/>
+        <polygon points="140,272 200,262 200,318" fill="var(--o-pale)"/>
+        <polygon points="140,272 200,318 132,348" fill="var(--o-frost)"/>
+        <polygon points="132,348 200,318 158,402" fill="var(--o-light)"/>
+        <polygon points="200,318 200,420 158,402" fill="var(--o-frost)"/>
+        <polygon points="260,272 200,262 200,318" fill="var(--o-frost)"/>
+        <polygon points="260,272 200,318 268,348" fill="var(--o-light)"/>
+        <polygon points="268,348 200,318 242,402" fill="var(--o-sky)"/>
+        <polygon points="200,318 200,420 242,402" fill="var(--o-light)"/>
+        <!-- chevron band -->
+        <polygon points="70,330 200,400 330,330 330,350 200,424 70,350" fill="var(--o-navy)" clip-path="url(#bodyClip)"/>
+        <polygon points="200,400 330,330 330,350 200,424" fill="var(--o-deep)" clip-path="url(#bodyClip)"/>
 
-        <!-- ear tuft feathers; outside #head because the tufts don't turn -->
-        <path d="M89,62 C104,76 122,94 136,110 L106,124 C104,102 98,82 89,62 Z" fill="var(--o-navy)"/>
-        <path d="M311,62 C296,76 278,94 264,110 L294,124 C296,102 302,82 311,62 Z" fill="var(--o-deep)"/>
-        <path d="M97,84 C101,96 103,106 105,116 M303,84 C299,96 297,106 295,116" stroke="var(--o-light)" stroke-width="4" stroke-linecap="round" fill="none"/>
-
-        <!-- chest: colonnade under an architrave, then layered chevrons -->
-        <g clip-path="url(#bodyClip)" stroke="var(--o-ink)" stroke-width="4" stroke-linejoin="round">
-          <g stroke="none">
-            <rect x="121" y="276" width="24" height="74" fill="var(--o-pale)"/>
-            <rect x="155" y="276" width="24" height="94" fill="var(--o-pale)"/>
-            <rect x="189" y="276" width="22" height="114" fill="var(--o-pale)"/>
-            <rect x="200" y="276" width="11" height="114" fill="var(--o-frost)"/>
-            <rect x="221" y="276" width="24" height="94" fill="var(--o-frost)"/>
-            <rect x="255" y="276" width="24" height="74" fill="var(--o-frost)"/>
-          </g>
-          <path d="M100,264 H300 V278 H100 Z" fill="var(--o-pale)"/>
-          <path d="M70,298 L200,372 L330,298 L330,338 L200,412 L70,338 Z" fill="var(--o-navy)"/>
-          <path d="M200,372 L330,298 L330,338 L200,412 Z" fill="var(--o-deep)" stroke="none"/>
-          <path d="M70,298 L200,372 L330,298" fill="none"/>
-          <path d="M70,318 L200,392 L330,318" fill="none" stroke="var(--o-blue)"/>
-        </g>
-
-        <!-- head -->
         <g id="head">
-          <!-- forehead chevrons -->
-          <path d="M182,124 L200,142 L218,124" fill="none" stroke="var(--o-navy)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M189,138 L200,149 L211,138" fill="none" stroke="var(--o-light)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- facial disc and brows -->
+          <polygon points="200,180 150,140 100,172" fill="var(--o-light)"/>
+          <polygon points="200,180 100,172 98,222" fill="var(--o-frost)"/>
+          <polygon points="200,180 98,222 132,258" fill="var(--o-light)"/>
+          <polygon points="200,180 132,258 200,276" fill="var(--o-frost)"/>
+          <polygon points="200,180 250,140 300,172" fill="var(--o-sky)"/>
+          <polygon points="200,180 300,172 302,222" fill="var(--o-light)"/>
+          <polygon points="200,180 302,222 268,258" fill="var(--o-sky)"/>
+          <polygon points="200,180 268,258 200,276" fill="var(--o-light)"/>
+          <polygon points="200,184 112,128 150,166" fill="var(--o-white)"/>
+          <polygon points="200,184 288,128 250,166" fill="var(--o-pale)"/>
 
-          <!-- brows sweeping up toward the tufts -->
-          <path d="M200,178 C178,150 148,134 114,126 C123,143 136,154 153,160 C173,166 188,174 200,190 Z"
-                fill="var(--o-white)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-          <path d="M200,178 C222,150 252,134 286,126 C277,143 264,154 247,160 C227,166 212,174 200,190 Z"
-                fill="var(--o-pale)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-
-          <!-- facial disc -->
-          <path d="M200,188 C180,160 126,152 106,190 C98,230 128,256 166,252 L200,274 L234,252 C272,256 302,230 294,190 C274,152 220,160 200,188 Z"
-                fill="var(--o-light)" stroke="var(--o-ink)" stroke-width="6" stroke-linejoin="round"/>
-          <path d="M200,191 L200,270 L233,249 C270,253 299,229 291,191 C272,156 222,163 200,191 Z" fill="var(--o-mid)" opacity=".22"/>
-
-          <!-- eyes -->
           <g class="eye" data-cx="152" data-cy="192">
-            <circle cx="152" cy="192" r="42" fill="url(#ringGrad)" stroke="var(--o-ink)" stroke-width="6"/>
+            <circle cx="152" cy="192" r="42" fill="var(--o-white)" stroke="var(--o-deep)" stroke-width="4"/>
+            <path d="M152,150 A42,42 0 0 0 152,234 Z" fill="var(--o-frost)" opacity=".7"/>
             <g clip-path="url(#eyeClipL)">
               <g class="pupil">
-                <circle cx="152" cy="192" r="27" fill="var(--o-ink)"/>
-                <circle cx="143" cy="182" r="7.5" fill="var(--o-white)"/>
-                <circle cx="161" cy="202" r="2.5" fill="var(--o-white)" opacity=".7"/>
+                <circle cx="152" cy="192" r="26" fill="var(--o-ink)"/>
+                <polygon points="140,178 150,176 144,186" fill="var(--o-white)"/>
               </g>
-              <ellipse class="lid" cx="152" cy="192" rx="50" ry="48" fill="var(--o-mid)" stroke="var(--o-ink)" stroke-width="4"/>
+              <ellipse class="lid" cx="152" cy="192" rx="50" ry="48" fill="var(--o-blue)"/>
             </g>
           </g>
           <g class="eye" data-cx="248" data-cy="192">
-            <circle cx="248" cy="192" r="42" fill="url(#ringGrad)" stroke="var(--o-ink)" stroke-width="6"/>
+            <circle cx="248" cy="192" r="42" fill="var(--o-white)" stroke="var(--o-deep)" stroke-width="4"/>
+            <path d="M248,150 A42,42 0 0 1 248,234 Z" fill="var(--o-frost)" opacity=".7"/>
             <g clip-path="url(#eyeClipR)">
               <g class="pupil">
-                <circle cx="248" cy="192" r="27" fill="var(--o-ink)"/>
-                <circle cx="239" cy="182" r="7.5" fill="var(--o-white)"/>
-                <circle cx="257" cy="202" r="2.5" fill="var(--o-white)" opacity=".7"/>
+                <circle cx="248" cy="192" r="26" fill="var(--o-ink)"/>
+                <polygon points="236,178 246,176 240,186" fill="var(--o-white)"/>
               </g>
-              <ellipse class="lid" cx="248" cy="192" rx="50" ry="48" fill="var(--o-mid)" stroke="var(--o-ink)" stroke-width="4"/>
+              <ellipse class="lid" cx="248" cy="192" rx="50" ry="48" fill="var(--o-blue)"/>
             </g>
           </g>
 
           <!-- beak -->
-          <path d="M200,212 L216,236 L200,270 L184,236 Z" fill="var(--o-blue)" stroke="var(--o-ink)" stroke-width="4" stroke-linejoin="round"/>
-          <path d="M200,214 L214,236 L200,266 Z" fill="var(--o-navy)"/>
+          <polygon points="200,214 214,238 200,268" fill="var(--o-navy)"/>
+          <polygon points="200,214 186,238 200,268" fill="var(--o-mid)"/>
         </g>
       </g>
 
-      <!-- wings (drawn over body sides; pivot at the shoulder caps) -->
-      <g id="wing-l" class="wing">
-        <use href="#owl-wing" fill="url(#wingGrad)"/>
-      </g>
-      <g id="wing-r" class="wing">
-        <use href="#owl-wing" fill="url(#wingGradShade)" transform="matrix(-1 0 0 1 400 0)"/>
-      </g>
+      <!-- wings pivot on their shoulder points (102,244) / (298,244) -->
+      <g id="wing-l" class="wing"><use href="#owl-wing-l"/></g>
+      <g id="wing-r" class="wing"><use href="#owl-wing-r"/></g>
 
-      </g>
     </g>
     </g>
   </g>
