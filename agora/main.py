@@ -1124,6 +1124,7 @@ async def home_page(
                 "agent_json_verified": agent.agent_json_verified,
                 "email": sanitize_ui_text(agent.email, max_length=320),
                 "response_sla": sanitize_ui_text(agent.response_sla, max_length=255),
+                "location": sanitize_ui_text(agent.location, max_length=255),
                 "email_verified": agent.email_verified,
                 "commitments_count": agent.commitments_count,
                 "commitments_summary": sanitize_ui_text(agent.commitments_summary, max_length=2000)
@@ -1290,6 +1291,7 @@ async def agent_detail_page(
         "url": safe_agent_card.get("url"),
         "email": sanitize_ui_text(detail.get("email"), max_length=320),
         "response_sla": sanitize_ui_text(detail.get("response_sla"), max_length=255),
+        "location": sanitize_ui_text(detail.get("location"), max_length=255),
         "email_verified": detail.get("email_verified", False),
         "health_status": detail.get("health_status") or "unknown",
         "is_verified": False,
@@ -3487,6 +3489,7 @@ def _minimal_listing(agent: Agent) -> dict[str, Any]:
         "description": agent.description,
         "email": agent.email,
         "response_sla": agent.response_sla,
+        "location": agent.location,
         "capabilities": list(agent.capabilities or []),
         "url": agent.url,
         "verified_email": agent.email_verified,
@@ -3504,7 +3507,7 @@ async def register_agent_minimal(
 ) -> dict[str, Any]:
     """Register with the minimal directory listing.
 
-    Required: name, description, email. Optional: response_sla,
+    Required: name, description, email. Optional: response_sla, location,
     capabilities (list of strings), url. The X-API-Key header is a
     self-chosen owner secret (stored as a hash) used for later updates,
     heartbeats, and re-sending the verification email — same ownership model
@@ -3533,6 +3536,11 @@ async def register_agent_minimal(
     response_sla = _normalize_optional_string_field(
         field_name="response_sla",
         value=sanitized_payload.get("response_sla"),
+        max_length=255,
+    )
+    location = _normalize_optional_string_field(
+        field_name="location",
+        value=sanitized_payload.get("location"),
         max_length=255,
     )
     capabilities = _normalize_capability_list(sanitized_payload.get("capabilities"))
@@ -3590,6 +3598,8 @@ async def register_agent_minimal(
         minimal_card["description"] = description
     if response_sla:
         minimal_card["response_sla"] = response_sla
+    if location:
+        minimal_card["location"] = location
     if capabilities:
         minimal_card["capabilities"] = capabilities
     if normalized_url:
@@ -3603,6 +3613,7 @@ async def register_agent_minimal(
         capabilities=capabilities,
         email=email,
         response_sla=response_sla,
+        location=location,
         email_verified=False,
         directory_slug=slug,
         owner_key_hash=hash_api_key(api_key),
@@ -4282,6 +4293,7 @@ async def get_agent_detail(
         "taskLatency": agent.task_latency,
         "email": agent.email,
         "response_sla": agent.response_sla,
+        "location": agent.location,
         "email_verified": agent.email_verified,
         "directory_slug": agent.directory_slug,
     }
