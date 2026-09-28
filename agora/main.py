@@ -3260,11 +3260,11 @@ def _email_signing_key() -> bytes:
     return _EPHEMERAL_EMAIL_SIGNING_KEY
 
 
-def _issue_email_verification_token(agent_id: UUID, email: str) -> str:
+def _issue_email_verification_token(agent_id: UUID, email: str, *, generation: str | None = None, purpose: str = "registration") -> str:
     """Issue a signed, expiring token for the email verification link."""
     expires_at = int(time.time()) + settings.email_verification_ttl_hours * 3600
     payload = json.dumps(
-        {"aid": str(agent_id), "em": email, "exp": expires_at},
+        {"aid": str(agent_id), "em": email, "exp": expires_at, "gen": generation, "purpose": purpose},
         separators=(",", ":"),
     ).encode("utf-8")
     signature = hmac.new(_email_signing_key(), payload, hashlib.sha256).digest()
@@ -3275,7 +3275,7 @@ def _issue_email_verification_token(agent_id: UUID, email: str) -> str:
     return f"{_b64(payload)}.{_b64(signature)}"
 
 
-def _parse_email_verification_token(token: str) -> tuple[UUID, str] | None:
+def _parse_email_token_state(token: str) -> tuple[UUID, str, str | None, str] | None:
     """Return ``(agent_id, email)`` for a valid token, else ``None``."""
     try:
         payload_b64, signature_b64 = token.split(".", 1)
@@ -3292,13 +3292,18 @@ def _parse_email_verification_token(token: str) -> tuple[UUID, str] | None:
         data = json.loads(payload.decode("utf-8"))
         if int(data["exp"]) < int(time.time()):
             return None
-        return UUID(str(data["aid"])), str(data["em"])
+        return UUID(str(data["aid"])), str(data["em"]), data.get("gen"), data.get("purpose", "registration")
     except (ValueError, KeyError, TypeError, AttributeError):
         return None
 
 
-def _email_verification_url(agent_id: UUID, email: str) -> str:
-    token = _issue_email_verification_token(agent_id, email)
+def _parse_email_verification_token(token: str) -> tuple[UUID, str] | None:
+    parsed = _parse_email_token_state(token)
+    return parsed[:2] if parsed else None
+
+
+def _email_verification_url(agent_id: UUID, email: str, *, generation: str | None = None, purpose: str = "registration") -> str:
+    token = _issue_email_verification_token(agent_id, email, generation=generation, purpose=purpose)
     base = settings.email_verify_base_url.rstrip("/")
     return f"{base}/verify-email?token={token}"
 
@@ -3309,7 +3314,7 @@ def _verification_email_text(*, agent_name: str, email: str, verify_url: str) ->
         f"""\
         Hello,
 
-        Someone registered the agent "{agent_name}" in the Agora directory
+        Someone requested email verification for the agent "{agent_name}" in the Agora directory
         (https://the-agora.dev) with this email address ({email}).
 
         To confirm the listing is yours and earn the verified badge, open this link:
@@ -3317,7 +3322,7 @@ def _verification_email_text(*, agent_name: str, email: str, verify_url: str) ->
         {verify_url}
 
         The link expires in {ttl_hours} hours. If you didn't request this,
-        just ignore this email — the listing stays unverified.
+        just ignore this email — no email change will be confirmed.
 
         — Agora
         """
@@ -3560,7 +3565,7 @@ async def register_agent_minimal(
             ) from exc
 
     existing_by_email = await session.scalar(
-        select(Agent.id).where(Agent.email == email).limit(1)
+        select(Agent.id).where(func.lower(Agent.email) == email.lower()).limit(1)
     )
     if existing_by_email:
         raise HTTPException(
@@ -3647,6 +3652,168 @@ async def register_agent_minimal(
     }
 
 
+MINIMAL_OWNER_RATE_LIMIT_PER_IP = 120
+MINIMAL_OWNER_READ_LIMIT_PER_KEY = 120
+MINIMAL_OWNER_WRITE_LIMIT_PER_KEY = 20
+
+
+async def _enforce_minimal_owner_rate_limits(request: Request, api_key: str, action: str) -> None:
+    # The IP bucket also bounds requests that rotate invalid keys or listing IDs.
+    await _enforce_rate_limit(
+        key=f"api:minimal_owner:ip:{_client_ip(request)}",
+        limit=MINIMAL_OWNER_RATE_LIMIT_PER_IP,
+    )
+    await _enforce_rate_limit(
+        key=f"api:minimal_owner:{action}:key:{api_key_fingerprint(api_key)}",
+        limit=(MINIMAL_OWNER_READ_LIMIT_PER_KEY if action == "get" else MINIMAL_OWNER_WRITE_LIMIT_PER_KEY),
+    )
+
+
+async def _owned_minimal_agent(
+    session: AsyncSession, agent_id: UUID, api_key: str, *, for_update: bool = False,
+) -> Agent:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if for_update:
+        # Refresh the row under lock: another request may have changed its owner key.
+        agent = await session.scalar(
+            select(Agent).where(Agent.id == agent_id).with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if not verify_api_key(api_key, agent.owner_key_hash):
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    if agent.agent_card.get("directory_listing") is not True:
+        raise HTTPException(status_code=409, detail="This endpoint only supports minimal listings")
+    return agent
+
+
+def _minimal_owner_listing(agent: Agent) -> dict[str, Any]:
+    return {**_minimal_listing(agent), "id": str(agent.id),
+            "email_verified": agent.email_verified, "pending_email": agent.pending_email}
+
+
+async def _send_pending_email(agent: Agent) -> bool:
+    return await _send_verification_email(
+        to_email=agent.pending_email, agent_name=agent.name,
+        verify_url=_email_verification_url(agent.id, agent.pending_email,
+                                          generation=agent.pending_email_nonce, purpose="change"),
+    )
+
+
+@app.get("/api/v1/agents/{agent_id}/minimal", tags=["agents"])
+async def get_minimal_owner_listing(
+    agent_id: UUID, request: Request, response: Response, session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    """Owner-only listing view, including a private pending email change."""
+    await _enforce_minimal_owner_rate_limits(request, api_key, "get")
+    response.headers["Cache-Control"] = "no-store"
+    return _minimal_owner_listing(await _owned_minimal_agent(session, agent_id, api_key))
+
+
+@app.patch("/api/v1/agents/{agent_id}/minimal", tags=["agents"])
+async def update_minimal_listing(
+    agent_id: UUID, payload: dict[str, Any], request: Request, response: Response,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    """Apply profile changes immediately; verify a new email before publishing it.
+
+    Omitted fields stay unchanged. URL, ID, slug and ownership key are immutable.
+    Optional text accepts null; capabilities accepts a replacement string list.
+    """
+    await _enforce_minimal_owner_rate_limits(request, api_key, "patch")
+    response.headers["Cache-Control"] = "no-store"
+    agent = await _owned_minimal_agent(session, agent_id, api_key, for_update=True)
+    allowed = {"name", "description", "response_sla", "location", "capabilities", "email"}
+    unknown = set(payload) - allowed
+    if unknown:
+        raise HTTPException(status_code=400, detail="Unknown or immutable fields: " + ", ".join(sorted(unknown)))
+    normalized: dict[str, Any] = {}
+    for field, limit in (("name", 255), ("description", 5000), ("response_sla", 255), ("location", 255)):
+        if field not in payload:
+            continue
+        if payload[field] is not None and not isinstance(payload[field], str):
+            raise HTTPException(status_code=400, detail=f"{field} must be a string or null")
+        normalized[field] = _normalize_optional_string_field(
+            field_name=field, value=sanitize_json_strings(payload[field]), max_length=limit)
+        if field == "name" and not normalized[field]:
+            raise HTTPException(status_code=400, detail="name is required")
+    if "capabilities" in payload:
+        value = payload["capabilities"]
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise HTTPException(status_code=400, detail="capabilities must be a list of strings")
+        normalized["capabilities"] = _normalize_capability_list(sanitize_json_strings(value))
+    email = None
+    if "email" in payload:
+        if not isinstance(payload["email"], str):
+            raise HTTPException(status_code=400, detail="email must be a string")
+        email = _normalize_email_field(field_name="email", value=payload["email"])
+        if email.lower() == agent.email.lower():
+            raise HTTPException(status_code=400, detail="Email is already the current address; use pending-email cancellation to cancel a change")
+        collision = await session.scalar(select(Agent.id).where(func.lower(Agent.email) == email.lower(), Agent.id != agent.id).limit(1))
+        if collision:
+            raise HTTPException(status_code=409, detail="An agent with this email is already registered")
+        await _enforce_rate_limit(key=f"api:pending_email:agent:{agent_id}", limit=5)
+    card = dict(agent.agent_card)
+    for field, value in normalized.items():
+        setattr(agent, field, value)
+        if value is None:
+            card.pop(field, None)
+        else:
+            card[field] = value
+    agent.agent_card = card
+    if email is not None:
+        agent.pending_email = email
+        agent.pending_email_nonce = token_urlsafe(32)
+    await session.commit()
+    await session.refresh(agent, attribute_names=["updated_at"])
+    result = _minimal_owner_listing(agent)
+    if email is not None:
+        result["verification_email_sent"] = await _send_pending_email(agent)
+        result["message"] = "Profile changes applied. Email change pending verification; current public email is unchanged."
+    return result
+
+
+@app.delete("/api/v1/agents/{agent_id}/minimal/pending-email", tags=["agents"])
+async def cancel_pending_email(
+    agent_id: UUID, request: Request, response: Response, session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    await _enforce_minimal_owner_rate_limits(request, api_key, "cancel")
+    response.headers["Cache-Control"] = "no-store"
+    agent = await _owned_minimal_agent(session, agent_id, api_key, for_update=True)
+    agent.pending_email = None
+    agent.pending_email_nonce = None
+    await session.commit()
+    await session.refresh(agent, attribute_names=["updated_at"])
+    return _minimal_owner_listing(agent)
+
+
+@app.post("/api/v1/agents/{agent_id}/minimal/pending-email/resend", tags=["agents"])
+async def resend_pending_email(
+    agent_id: UUID, request: Request, response: Response, session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    await _enforce_minimal_owner_rate_limits(request, api_key, "resend")
+    response.headers["Cache-Control"] = "no-store"
+    agent = await _owned_minimal_agent(session, agent_id, api_key, for_update=True)
+    if not agent.pending_email:
+        raise HTTPException(status_code=400, detail="No pending email change")
+    await _enforce_rate_limit(key=f"api:pending_email:agent:{agent_id}", limit=5)
+    agent.pending_email_nonce = token_urlsafe(32)
+    await session.commit()
+    await session.refresh(agent, attribute_names=["updated_at"])
+    result = _minimal_owner_listing(agent)
+    result["verification_email_sent"] = await _send_pending_email(agent)
+    return result
+
+
 @app.get("/verify-email", tags=["agents"], include_in_schema=False)
 async def verify_email_link(
     token: str | None = Query(default=None),
@@ -3664,7 +3831,7 @@ async def verify_email_link(
             status_code=status_code,
         )
 
-    parsed = _parse_email_verification_token(token) if token else None
+    parsed = _parse_email_token_state(token) if token else None
     if parsed is None:
         return _page(
             heading="Link invalid or expired",
@@ -3675,15 +3842,35 @@ async def verify_email_link(
             ok=False,
             status_code=400,
         )
-    agent_id, token_email = parsed
-    agent = await session.get(Agent, agent_id)
-    if agent is None or not agent.email or agent.email.lower() != token_email.lower():
+    agent_id, token_email, generation, purpose = parsed
+    agent = await session.scalar(select(Agent).where(Agent.id == agent_id).with_for_update())
+    changing = purpose == "change"
+    valid = agent is not None and (
+        changing and agent.pending_email == token_email and generation is not None
+        and agent.pending_email_nonce == generation
+        or purpose == "registration" and agent.email == token_email
+        and agent.email_generation == generation
+    )
+    if not valid:
         return _page(
             heading="Link invalid or expired",
             body_html="This verification link does not match any pending listing.",
             ok=False,
             status_code=400,
         )
+    if changing:
+        agent.email = agent.pending_email
+        agent.pending_email = None
+        agent.pending_email_nonce = None
+        agent.email_generation = token_urlsafe(32)
+        agent.agent_card = {**agent.agent_card, "email": agent.email}
+        agent.email_verified = True
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return _page("Email unavailable", "This email is already registered. Request another address.", False, 409)
+        return _page("Email verified", "Your listing now uses the verified new email address.", True, 200)
     if agent.email_verified:
         return _page(
             heading="Already verified",
@@ -3742,7 +3929,7 @@ async def resend_verification_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No email address on this listing",
         )
-    verify_url = _email_verification_url(agent.id, agent.email)
+    verify_url = _email_verification_url(agent.id, agent.email, generation=agent.email_generation)
     email_sent = await _send_verification_email(
         to_email=agent.email, agent_name=agent.name, verify_url=verify_url
     )

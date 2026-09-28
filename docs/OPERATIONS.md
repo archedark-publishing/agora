@@ -2,7 +2,7 @@
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and adjust as needed.
+Copy `.env.example` to `.env` and adjust as needed. The example points verification links to localhost for local development. Set `EMAIL_VERIFY_BASE_URL` to each hosted environment's public origin. Keep `EMAIL_SIGNING_SECRET` stable and private: when unset, the app uses a process-local key, so links stop working after a restart. Without `RESEND_API_KEY`, the app logs the link instead of sending email. A successful provider response means the send was accepted, not that the message reached an inbox.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -17,15 +17,20 @@ Copy `.env.example` to `.env` and adjust as needed.
 | `RECOVERY_CHALLENGE_TTL_SECONDS` | `900` | Recovery challenge TTL |
 | `OUTBOUND_HTTP_TIMEOUT_SECONDS` | `10` | Timeout for outbound HTTP checks |
 | `REGISTRY_REFRESH_INTERVAL` | `3600` | Seconds between `registry.json` refreshes |
+| `RESEND_API_KEY` | empty | Resend API key for verification email; empty logs links instead of sending |
+| `EMAIL_FROM` | `Agora <verify@the-agora.dev>` | Sender identity for verification mail; use an address approved by your email provider |
+| `EMAIL_VERIFY_BASE_URL` | `https://the-agora.dev` in app; `http://localhost:8000` in `.env.example` and local Compose | Public origin placed in verification links |
+| `EMAIL_VERIFICATION_TTL_HOURS` | `48` | Hours before a signed verification link expires |
+| `EMAIL_SIGNING_SECRET` | empty | Persistent secret for signing verification links; set it on every hosted deployment |
 | `ADMIN_API_TOKEN` | empty | Required for admin/metrics endpoints |
 | `ALLOW_PRIVATE_NETWORK_TARGETS` | `false` | Dev/testing override for private host checks |
 | `ALLOW_UNRESOLVABLE_REGISTRATION_HOSTNAMES` | `false` | Dev/testing override to allow unresolved registration hostnames |
 | `RATE_LIMIT_BACKEND` | `auto` | `auto`, `memory`, or `redis` |
 | `REDIS_URL` | empty | Redis URL for shared rate limiting |
 | `RATE_LIMIT_PREFIX` | `agora:rate_limit` | Redis key namespace prefix |
-| `REGISTRATION_RATE_LIMIT_PER_IP` | `10` | `POST /api/v1/agents` per-source-IP limit |
-| `REGISTRATION_RATE_LIMIT_PER_API_KEY` | `10` | `POST /api/v1/agents` per-key secondary limit |
-| `REGISTRATION_RATE_LIMIT_GLOBAL` | `200` | `POST /api/v1/agents` global limit |
+| `REGISTRATION_RATE_LIMIT_PER_IP` | `10` | Agent registration per-source-IP limit, including minimal registration |
+| `REGISTRATION_RATE_LIMIT_PER_API_KEY` | `10` | Agent registration per-key secondary limit, including minimal registration |
+| `REGISTRATION_RATE_LIMIT_GLOBAL` | `200` | Agent registration global limit, including minimal registration |
 | `LIST_AGENTS_RATE_LIMIT_PER_IP` | `100` | `GET /api/v1/agents` per-source-IP limit (always applied) |
 | `LIST_AGENTS_RATE_LIMIT_PER_API_KEY` | `1000` | `GET /api/v1/agents` additional per-key secondary limit |
 | `LIST_AGENTS_RATE_LIMIT_GLOBAL` | `5000` | `GET /api/v1/agents` global limit |
@@ -63,9 +68,11 @@ Window: 1 hour.
 
 | Endpoint | Limit |
 |---|---|
-| `POST /api/v1/agents` | 10/hour per source IP + 10/hour per API key + 200/hour global |
+| `POST /api/v1/agents` and `/api/v1/agents/minimal` | 10/hour per source IP + 10/hour per API key + 200/hour global |
 | `GET /api/v1/agents` | 100/hour per source IP + 1000/hour per API key + 5000/hour global |
 | `PUT /api/v1/agents/{id}` | 20/hour per API key |
+| Minimal owner GET/PATCH/pending-email cancel/resend | 120/hour shared per source IP; GET 120/hour per key; each write action 20/hour per key |
+| Minimal pending-email request + resend | 5/hour shared per listing, after owner authorization |
 | `DELETE /api/v1/agents/{id}` | 10/hour per API key |
 | `GET /api/v1/registry.json` | 10/hour per IP |
 | `POST /api/v1/agents/{id}/recovery/start` | 5/hour per IP and 3/hour per agent |
@@ -97,3 +104,21 @@ For multi-instance deployments, configure `RATE_LIMIT_BACKEND=redis` + `REDIS_UR
 - `Cache-Control: public, max-age=300, stale-while-revalidate=120`
 - `ETag`
 - `Last-Modified`
+
+`GET /agents.json` returns the newest 500 listings by registration time, with public email and contact fields. It is a bounded feed, not a complete export of every listing.
+
+### Minimal-listing email update migration
+
+Migration `20260928_0024` adds private pending-email state and a unique index on
+`lower(email)`. It stops if existing listings share an email ignoring case;
+it does not merge or delete them. Before deploying, check for collisions with:
+
+```sql
+SELECT lower(email), count(*) FROM agents
+WHERE email IS NOT NULL GROUP BY lower(email) HAVING count(*) > 1;
+```
+
+Resolve any collisions with the affected owners before retrying the migration.
+Pending addresses are not reserved; confirmation returns `409` if another
+listing acquired the address meanwhile. Keep `EMAIL_SIGNING_SECRET` persistent
+so outstanding registration and email-change links survive restarts.

@@ -69,6 +69,7 @@ class Agent(Base):
         Index("idx_agents_protocol_version", "protocol_version"),
         Index("idx_agents_oatr_issuer_id", "oatr_issuer_id"),
         Index("idx_agents_email", "email"),
+        Index("uq_agents_email_lower", func.lower(text("email")), unique=True),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -90,6 +91,9 @@ class Agent(Base):
     # Minimal directory fields (Agora v2): the listing centers on an email
     # contact address and a self-reported response SLA.
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    pending_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    pending_email_nonce: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email_generation: Mapped[str | None] = mapped_column(String(64), nullable=True)
     response_sla: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Optional free-text location ("Philadelphia, PA", "Remote"). Self-declared
     # and informational only — no geocoding or proximity search.
