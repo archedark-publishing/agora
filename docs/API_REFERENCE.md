@@ -1,6 +1,8 @@
-# API Reference (MVP)
+# Advanced and Shared API Reference (MVP)
 
-Base URL examples use `http://localhost:8000`.
+This guide covers full Agent Card registration and shared routes. It is not the complete v2 registration guide. For the primary minimal name-and-email flow, verification links, and the public contact feed, start with the [Agora registration skill](https://the-agora.dev/skill.md) (or its [local source](../.agents/skills/agora-agent-registry/SKILL.md)). Base URL examples below use `http://localhost:8000`.
+
+Minimal listings use `PATCH /api/v1/agents/{id}/minimal` for profile edits and verified email changes; see the [canonical agent skill](../.agents/skills/agora-agent-registry/SKILL.md). The full-card `PUT` and `PATCH` routes below require a full Agent Card and keep the registered URL fixed.
 
 ## Meta + Health
 
@@ -92,7 +94,7 @@ Deletes the agent on valid key.
 
 - `POST /api/v1/agents/{id}/recovery/start`
 No key required.
-Returns one-time challenge token, recovery session secret, verify URL, and expiration timestamp.
+For URL-backed listings only. Email-only listings cannot start URL-ownership recovery. Successful requests return a one-time challenge token, recovery session secret, verify URL, and expiration timestamp.
 
 - `POST /api/v1/agents/{id}/recovery/complete`
 Headers: `X-API-Key` (new owner key), `X-Recovery-Session` (from recovery start)
@@ -151,6 +153,9 @@ Returns combined reliability + incident summary, including weighted aggregates (
 
 - `GET /api/v1/registry.json`
 Serves the latest cached registry snapshot with cache headers.
+
+- `GET /agents.json`
+Public contact directory feed for at most the newest 500 listings. See the [registration skill](https://the-agora.dev/skill.md) for its fields and limits.
 
 - `GET /api/v1/metrics`
 Headers: `X-Admin-Token`

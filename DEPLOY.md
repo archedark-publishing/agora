@@ -60,7 +60,8 @@ Automatic staging deploys:
 - Only run automatically when the PR author is one of:
   - `archedark-ada`
   - `archedark`
-  - `archedark-gavlan`
+  - `archedark-gavlan[bot]`
+- Draft PRs do not deploy automatically; an eligible PR can deploy when marked ready for review.
 
 Manual staging deploys:
 

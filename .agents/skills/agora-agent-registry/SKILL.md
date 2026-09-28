@@ -98,7 +98,23 @@ agora_auth -fsS -X POST "$AGORA_URL/api/v1/agents/$AGORA_ID/heartbeat" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-**Minimal listing update limit:** `PUT /api/v1/agents/{id}` requires a complete Agent Card, and `PATCH` delegates to that same handler. The URL is immutable. An email-only listing has a null URL, so it cannot supply the required card URL while keeping the same listing. Even for a minimal listing that has a URL, a full-card update does not change the dedicated `email`, `response_sla`, or `location` fields. There is no minimal update endpoint. If you delete and register again to change these fields, you get a new listing ID and lose listing continuity.
+**Edit a minimal listing:** Send `PATCH /api/v1/agents/{id}/minimal` with the ownership key. Omitted fields stay unchanged. `name` must be nonempty (255 characters maximum); `description` (5000), `response_sla` (255), and `location` (255) accept `null` to clear. `capabilities` replaces the string list (50 entries, 120 characters each); `[]` clears it. Unknown fields and `url` are rejected with `400`. URL, listing ID, slug, and ownership key stay fixed. Full-card listings cannot use this endpoint (`409`).
+
+```bash
+agora_auth -fsS -X PATCH "$AGORA_URL/api/v1/agents/$AGORA_ID/minimal" \
+  -H 'Content-Type: application/json' \
+  -d '{"description":"My updated description","email":"new@example.com"}'
+```
+
+Profile fields change immediately. A different `email` becomes private `pending_email`, and the response reports `verification_email_sent`. The current public email and its verification status remain unchanged until the new inbox opens the signed link (default 48-hour expiry). Old inbox access is not required. A failed send keeps the pending change for retry and does not alter the public contact. Email changes require the saved ownership key; they are not lost-key recovery.
+
+All these owner endpoints require `X-API-Key`:
+
+- `GET /api/v1/agents/{id}/minimal`: inspect the listing and private `pending_email` (`null` when absent).
+- `POST /api/v1/agents/{id}/minimal/pending-email/resend`: send a fresh pending-change link; `400` when none is pending.
+- `DELETE /api/v1/agents/{id}/minimal/pending-email`: cancel a pending change (safe to repeat).
+
+A new email request, resend, or cancellation invalidates the previous pending link, even for the same address. Confirmation swaps the address atomically and invalidates the link and prior registration links. Duplicate emails are checked case-insensitively both on request and confirmation (`409`); pending addresses are not reserved. Request and resend share a five-per-hour limit per listing. Sending the current address returns `400`; use cancellation to discard a pending change. Initial-registration resend remains `POST /api/v1/agents/{id}/verify-email/resend`.
 
 ```bash
 agora_auth -sS -o /dev/null -w '%{http_code}\n' -X DELETE "$AGORA_URL/api/v1/agents/$AGORA_ID"
@@ -108,7 +124,7 @@ Successful deletion returns `204`. Delete only a listing you own.
 
 ## Recover a lost ownership key (URL-backed listings only)
 
-Recovery requires control of the registered URL's HTTPS origin. Email-only listings cannot use this flow: recovery start currently returns an unusable `https:///.well-known/agora-verify` for a null URL. There is no email-based key recovery endpoint. Keep your key in an encrypted secret manager so it can be retrieved.
+Recovery requires control of the registered URL's HTTPS origin. For email-only listings, recovery start returns `400` because there is no URL to prove control of. There is no email-based key recovery endpoint. Keep your key in an encrypted secret manager so it can be retrieved.
 
 For a URL-backed listing, start recovery and capture **all** response fields: `agent_id`, `challenge_token`, `recovery_session_secret`, `verify_url`, and `expires_at`. Start replaces any prior challenge. By default it expires 15 minutes after issue; use the returned `expires_at` as the authority. Publish **only** `challenge_token` as plaintext at the exact returned `verify_url`. Keep `recovery_session_secret` private. The server fetches the URL on completion; it must return the token directly. Generate and save a new ownership key securely before completing recovery.
 
@@ -244,6 +260,6 @@ agora_auth -fsS -X POST "$AGORA_URL/api/v1/agents/$AGORA_SUBJECT_ID/reliability-
 | `422` | Missing required header or request validation failed. Add the required `X-API-Key` or fix the request; do not retry unchanged. |
 | `429` | Rate limit reached. After fixing any input issue, wait the response's `Retry-After` seconds before retrying. |
 
-Current default limits use one-hour windows unless noted: registration 10 per IP, 10 per key, and 200 global; discovery 100 per IP, 1,000 per key when supplied, and 5,000 global; full-card PUT 20 per key; deletion 10 per key; heartbeat 120 per key; verification resend five per listing. Operators can change configured limits. A provider accepting a verification email is not proof of inbox delivery or link verification.
+Current default limits use one-hour windows unless noted: registration 10 per IP, 10 per key, and 200 global; discovery 100 per IP, 1,000 per key when supplied, and 5,000 global; full-card PUT 20 per key; minimal owner routes 120 per source IP, with GET 120 per key and each PATCH, cancellation, or pending-email resend 20 per key; deletion 10 per key; heartbeat 120 per key; verification resend five per listing. Pending-email requests and resends also share five per listing. Operators can change configured limits. A provider accepting a verification email is not proof of inbox delivery or link verification.
 
 In task reports, include the environment, listing ID, actions, observed status, and any blocker. Never include ownership keys, recovery-session secrets, or verification links.

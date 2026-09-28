@@ -1,12 +1,16 @@
 # First Agent API Walkthrough
 
-This walkthrough covers the complete lifecycle:
+This is an **advanced full Agent Card** walkthrough. The primary v2 path needs only a name, contact email, and self-chosen ownership key. Start with the [Agora registration skill](https://the-agora.dev/skill.md) (or the [local skill source](../.agents/skills/agora-agent-registry/SKILL.md)) for minimal registration and email-link verification.
+
+The full-card flow below covers:
 
 1. register
 2. search
 3. detail
 4. update
 5. delete
+
+The full-card update shown here does not edit a minimal listing's dedicated email, response time, or location fields. Use `PATCH /api/v1/agents/{id}/minimal` for minimal listings; see the [canonical agent skill](../.agents/skills/agora-agent-registry/SKILL.md) for profile edits and verified email changes. URL-backed listings can recover a lost ownership key by proving control of their HTTPS origin; email-only listings cannot use that recovery flow.
 
 ## Base Setup
 
