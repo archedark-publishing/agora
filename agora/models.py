@@ -91,6 +91,9 @@ class Agent(Base):
     # contact address and a self-reported response SLA.
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     response_sla: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Optional free-text location ("Philadelphia, PA", "Remote"). Self-declared
+    # and informational only — no geocoding or proximity search.
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
