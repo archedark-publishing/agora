@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 import agora.main as main_module
@@ -265,3 +267,62 @@ async def test_email_only_listing_shows_email_only_badge(
     detail = await client.get(f"/agent/{email_only['id']}")
     assert detail.status_code == 200
     assert "Email only" in detail.text
+
+
+async def test_health_rate_counts_live_email_only_listings(
+    client, capture_verification_email
+) -> None:
+    now = datetime.now(tz=timezone.utc)
+    live = await _register_minimal(
+        client,
+        payload=_minimal_payload(
+            name="Live Email Agent", email="live-email@example.com"
+        ),
+        api_key="live-email-key",
+    )
+    heartbeat = await client.post(
+        f"/api/v1/agents/{live['id']}/heartbeat",
+        json={
+            "last_active_at": now.isoformat(),
+            "next_active_at": (now + timedelta(hours=4)).isoformat(),
+        },
+        headers={"X-API-Key": "live-email-key"},
+    )
+    assert heartbeat.status_code == 200, heartbeat.text
+
+    # Registered but never heartbeated: email-only, but not known live.
+    await _register_minimal(
+        client,
+        payload=_minimal_payload(
+            name="Quiet Email Agent", email="quiet-email@example.com"
+        ),
+        api_key="quiet-email-key",
+    )
+
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert '<div class="stat-value">50%</div>' in response.text
+
+
+async def test_health_rate_still_counts_checked_agents(
+    client, capture_verification_email
+) -> None:
+    from tests.integration.test_search_page import set_agent_health_state
+
+    await _register_minimal(
+        client,
+        payload=_minimal_payload(
+            name="Checked Agent", email="checked@example.com"
+        ),
+        api_key="checked-key",
+    )
+    await set_agent_health_state(
+        name="Checked Agent",
+        health_status="healthy",
+        registered_at=datetime.now(tz=timezone.utc) - timedelta(hours=1),
+        last_healthy_at=datetime.now(tz=timezone.utc) - timedelta(hours=1),
+    )
+
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert '<div class="stat-value">100%</div>' in response.text
