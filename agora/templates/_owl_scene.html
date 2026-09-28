@@ -1,0 +1,262 @@
+{# Hero scene: Parthenon backdrop, olive branch, and the animated owl.
+   Element ids and classes are driven by /static/home.js and /static/home.css. #}
+<svg class="scene" viewBox="0 0 1440 860" preserveAspectRatio="xMinYMax slice" aria-hidden="true">
+  <defs>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF4DB" stop-opacity=".95"/>
+      <stop offset=".45" stop-color="#FDE9C4" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#FDE9C4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="haze" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F1F6FE" stop-opacity="0"/>
+      <stop offset="1" stop-color="#F6F9FE" stop-opacity=".85"/>
+    </linearGradient>
+    <linearGradient id="marble" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D5E0F0"/>
+      <stop offset="1" stop-color="#BCCBE2"/>
+    </linearGradient>
+    <linearGradient id="bark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5B4A3A"/>
+      <stop offset="1" stop-color="#2E241B"/>
+    </linearGradient>
+    <clipPath id="bodyClip"><path d="M84,42 L148,112 L200,102 L252,112 L316,42 L306,156 L320,232 L324,306 L296,390 L200,420 L104,390 L76,306 L80,232 L94,156 Z"/></clipPath>
+    <clipPath id="eyeClipL"><circle cx="152" cy="192" r="40"/></clipPath>
+    <clipPath id="eyeClipR"><circle cx="248" cy="192" r="40"/></clipPath>
+    <!-- origami wings: facets fanned around the shoulder pivot; the right wing is mirrored and shaded -->
+    <g id="owl-wing-l">
+      <polygon points="102,226 122,240 86,242" fill="var(--o-mid)"/>
+      <polygon points="86,242 122,240 100,300" fill="var(--o-blue)"/>
+      <polygon points="122,240 134,306 100,300" fill="var(--o-navy)"/>
+      <polygon points="86,242 100,300 72,306" fill="var(--o-navy)"/>
+      <polygon points="72,306 100,300 82,380" fill="var(--o-deep)"/>
+      <polygon points="100,300 134,306 126,384" fill="var(--o-blue)"/>
+      <polygon points="100,300 126,384 82,380" fill="var(--o-navy)"/>
+      <polygon points="82,380 126,384 104,414" fill="var(--o-ink)"/>
+    </g>
+    <g id="owl-wing-r" transform="matrix(-1 0 0 1 400 0)">
+      <polygon points="102,226 122,240 86,242" fill="var(--o-blue)"/>
+      <polygon points="86,242 122,240 100,300" fill="var(--o-navy)"/>
+      <polygon points="122,240 134,306 100,300" fill="var(--o-deep)"/>
+      <polygon points="86,242 100,300 72,306" fill="var(--o-deep)"/>
+      <polygon points="72,306 100,300 82,380" fill="var(--o-ink)"/>
+      <polygon points="100,300 134,306 126,384" fill="var(--o-navy)"/>
+      <polygon points="100,300 126,384 82,380" fill="var(--o-deep)"/>
+      <polygon points="82,380 126,384 104,414" fill="var(--o-ink)"/>
+    </g>
+  </defs>
+
+  <!-- The scene is bottom-anchored and crops from the top on wide screens;
+       this offset keeps the owl's ear tufts in view up to ~2000px wide. -->
+  <g transform="translate(0,70)">
+
+  <g transform="translate(-420,-120) scale(1.2)">
+  <!-- sun glow -->
+  <circle cx="800" cy="420" r="360" fill="url(#sun)"/>
+
+  <!-- distant hills -->
+  <path d="M-300,650 L0,640 C180,600 320,610 470,580 C620,550 700,520 860,528 C1020,536 1120,590 1260,600 C1360,607 1410,596 1440,590 L1440,860 L-300,860 Z" fill="#D9E4F4"/>
+
+  <!-- acropolis rock -->
+  <path d="M470,640 C520,600 560,590 610,588 L1000,588 C1050,590 1090,604 1130,640 C1180,680 1240,700 1300,710 L380,710 C420,690 440,666 470,640 Z" fill="#C8D6EA"/>
+
+  <!-- parthenon -->
+  <g id="parthenon" opacity=".95">
+    <!-- steps -->
+    <rect x="590" y="572" width="420" height="16" fill="#B7C7DF"/>
+    <rect x="600" y="558" width="400" height="14" fill="#C3D1E6"/>
+    <rect x="610" y="546" width="380" height="12" fill="#CFDBEC"/>
+    <!-- columns -->
+    <g fill="url(#marble)">
+      <rect x="622" y="420" width="22" height="126"/>
+      <rect x="668" y="420" width="22" height="126"/>
+      <rect x="714" y="420" width="22" height="126"/>
+      <rect x="760" y="420" width="22" height="126"/>
+      <rect x="818" y="420" width="22" height="126"/>
+      <rect x="864" y="420" width="22" height="126"/>
+      <rect x="910" y="420" width="22" height="126"/>
+      <rect x="956" y="420" width="22" height="126"/>
+    </g>
+    <!-- fluting -->
+    <g stroke="#AFC0DA" stroke-width="1.2">
+      <path d="M630,424 V544 M637,424 V544 M676,424 V544 M683,424 V544 M722,424 V544 M729,424 V544 M768,424 V544 M775,424 V544 M826,424 V544 M833,424 V544 M872,424 V544 M879,424 V544 M918,424 V544 M925,424 V544 M964,424 V544 M971,424 V544"/>
+    </g>
+    <!-- column shadow interior -->
+    <rect x="644" y="420" width="312" height="126" fill="#B3C3DC" opacity=".25"/>
+    <!-- capitals -->
+    <g fill="#C3D1E6">
+      <rect x="617" y="412" width="32" height="8"/><rect x="663" y="412" width="32" height="8"/>
+      <rect x="709" y="412" width="32" height="8"/><rect x="755" y="412" width="32" height="8"/>
+      <rect x="813" y="412" width="32" height="8"/><rect x="859" y="412" width="32" height="8"/>
+      <rect x="905" y="412" width="32" height="8"/><rect x="951" y="412" width="32" height="8"/>
+    </g>
+    <!-- architrave + frieze -->
+    <rect x="606" y="392" width="388" height="20" fill="#CAD7EA"/>
+    <rect x="606" y="372" width="388" height="20" fill="#BCCBE2"/>
+    <g fill="#A9BBD6">
+      <rect x="614" y="375" width="8" height="14"/><rect x="646" y="375" width="8" height="14"/><rect x="678" y="375" width="8" height="14"/>
+      <rect x="710" y="375" width="8" height="14"/><rect x="742" y="375" width="8" height="14"/><rect x="774" y="375" width="8" height="14"/>
+      <rect x="806" y="375" width="8" height="14"/><rect x="838" y="375" width="8" height="14"/><rect x="870" y="375" width="8" height="14"/>
+      <rect x="902" y="375" width="8" height="14"/><rect x="934" y="375" width="8" height="14"/><rect x="966" y="375" width="8" height="14"/>
+    </g>
+    <rect x="598" y="364" width="404" height="8" fill="#D3DEEE"/>
+    <!-- pediment -->
+    <path d="M598,364 L800,300 L1002,364 Z" fill="#D3DEEE"/>
+    <path d="M630,358 L800,312 L970,358 Z" fill="#C1CFE4"/>
+  </g>
+
+  </g>
+  <!-- low haze over background -->
+  <rect x="0" y="480" width="1440" height="260" fill="url(#haze)"/>
+
+  <!-- foreground hill hint -->
+  <path d="M0,790 C300,760 700,770 1000,760 C1200,754 1350,748 1440,745 L1440,860 L0,860 Z" fill="#EEF3FB"/>
+
+  <!-- ===== branch (enters from left edge) ===== -->
+  <g id="branch">
+    <path d="M-60,618 C60,624 180,634 300,642 C420,650 540,662 680,684 C706,688 728,694 750,702 C724,700 700,700 676,698 C540,690 420,680 300,674 C180,668 60,664 -60,660 Z" fill="url(#bark)"/>
+    <!-- twig -->
+    <path d="M560,670 C590,648 610,636 640,628 C616,646 596,660 574,678 Z" fill="#3B2F24"/>
+    <!-- olive leaves: each sways around the point where it joins the branch -->
+    <g class="leaf-sway" style="transform-origin:640px 628px; animation-delay:0s"><path d="M640,628 C660,610 686,606 706,612 C688,626 662,632 640,628 Z" fill="#7C9A74"/></g>
+    <g class="leaf-sway" style="transform-origin:624px 636px; animation-delay:-1.1s"><path d="M624,636 C628,614 642,598 662,590 C656,610 642,628 624,636 Z" fill="#6B8A64"/></g>
+    <g class="leaf-sway" style="transform-origin:700px 694px; animation-delay:-2.3s"><path d="M700,694 C720,706 736,724 742,744 C722,736 706,718 700,694 Z" fill="#7C9A74"/></g>
+    <g class="leaf-sway" style="transform-origin:672px 694px; animation-delay:-3.4s"><path d="M672,694 C682,716 684,740 678,758 C666,740 664,716 672,694 Z" fill="#6B8A64"/></g>
+    <g class="leaf-sway" style="transform-origin:90px 630px; animation-delay:-0.6s"><path d="M90,630 C96,606 112,592 134,588 C126,610 110,626 90,630 Z" fill="#6B8A64"/></g>
+    <g class="leaf-sway" style="transform-origin:60px 662px; animation-delay:-2.9s"><path d="M60,662 C66,686 62,708 50,724 C42,704 46,682 60,662 Z" fill="#7C9A74"/></g>
+    <g class="leaf-sway" style="transform-origin:150px 640px; animation-delay:-1.7s"><path d="M150,640 C170,626 194,624 212,632 C194,644 170,648 150,640 Z" fill="#8AA882"/></g>
+  </g>
+
+  <!-- ===== OWL ===== low-poly origami style. owl-local coords: 400 x 440, feet at y≈417.
+       Facets are mirrored left to right, with the right half one shade darker. -->
+  <g transform="translate(150,128) scale(1.25)">
+    <!-- contact shadow: fixed to the branch, fades as the owl lifts off -->
+    <ellipse id="owl-shadow" cx="200" cy="421" rx="78" ry="6" fill="var(--o-ink)" opacity=".12"/>
+    <g id="owl-fly">
+    <g id="owl" class="flapping">
+
+      <!-- talons: pale toes with ink claws, behind the belly -->
+      <g id="feet">
+        <polygon points="159,405 169,405 169,419 164,425 159,419" fill="var(--o-frost)"/>
+        <polygon points="160,420 168,420 167,433" fill="var(--o-ink)"/>
+        <polygon points="172,406 182,406 182,420 177,426 172,420" fill="var(--o-frost)"/>
+        <polygon points="173,421 181,421 180,434" fill="var(--o-ink)"/>
+        <polygon points="185,406 195,406 195,420 190,426 185,420" fill="var(--o-frost)"/>
+        <polygon points="186,421 194,421 193,434" fill="var(--o-ink)"/>
+        <polygon points="205,409 215,409 215,423 210,429 205,423" fill="var(--o-frost)"/>
+        <polygon points="206,424 214,424 207,437" fill="var(--o-ink)"/>
+        <polygon points="218,410 228,410 228,424 223,430 218,424" fill="var(--o-frost)"/>
+        <polygon points="219,425 227,425 220,438" fill="var(--o-ink)"/>
+        <polygon points="231,410 241,410 241,424 236,430 231,424" fill="var(--o-frost)"/>
+        <polygon points="232,425 240,425 233,438" fill="var(--o-ink)"/>
+      </g>
+
+      <g id="owl-body">
+        <!-- body silhouette (same path as #bodyClip) -->
+        <path d="M84,42 L148,112 L200,102 L252,112 L316,42 L306,156 L320,232 L324,306 L296,390 L200,420 L104,390 L76,306 L80,232 L94,156 Z" fill="var(--o-blue)"/>
+        <!-- body and tuft facets, then the chest facets -->
+        <polygon points="84,42 148,112 118,126" fill="var(--o-sky)"/>
+        <polygon points="84,42 118,126 94,156" fill="var(--o-blue)"/>
+        <polygon points="148,112 200,102 200,170" fill="var(--o-mid)"/>
+        <polygon points="148,112 200,170 118,126" fill="var(--o-blue)"/>
+        <polygon points="118,126 200,170 94,156" fill="var(--o-mid)"/>
+        <polygon points="94,156 80,232 140,272" fill="var(--o-mid)"/>
+        <polygon points="94,156 140,272 200,170" fill="var(--o-blue)"/>
+        <polygon points="80,232 76,306 132,348" fill="var(--o-blue)"/>
+        <polygon points="80,232 132,348 140,272" fill="var(--o-sky)"/>
+        <polygon points="76,306 104,390 132,348" fill="var(--o-navy)"/>
+        <polygon points="132,348 104,390 158,402" fill="var(--o-blue)"/>
+        <polygon points="104,390 200,420 158,402" fill="var(--o-mid)"/>
+        <polygon points="316,42 252,112 282,126" fill="var(--o-mid)"/>
+        <polygon points="316,42 282,126 306,156" fill="var(--o-navy)"/>
+        <polygon points="252,112 200,102 200,170" fill="var(--o-blue)"/>
+        <polygon points="252,112 200,170 282,126" fill="var(--o-navy)"/>
+        <polygon points="282,126 200,170 306,156" fill="var(--o-blue)"/>
+        <polygon points="306,156 320,232 260,272" fill="var(--o-blue)"/>
+        <polygon points="306,156 260,272 200,170" fill="var(--o-navy)"/>
+        <polygon points="320,232 324,306 268,348" fill="var(--o-navy)"/>
+        <polygon points="320,232 268,348 260,272" fill="var(--o-mid)"/>
+        <polygon points="324,306 296,390 268,348" fill="var(--o-deep)"/>
+        <polygon points="268,348 296,390 242,402" fill="var(--o-navy)"/>
+        <polygon points="296,390 200,420 242,402" fill="var(--o-blue)"/>
+        <polygon points="140,272 200,262 200,318" fill="var(--o-pale)"/>
+        <polygon points="140,272 200,318 132,348" fill="var(--o-frost)"/>
+        <polygon points="132,348 200,318 158,402" fill="var(--o-light)"/>
+        <polygon points="200,318 200,420 158,402" fill="var(--o-frost)"/>
+        <polygon points="260,272 200,262 200,318" fill="var(--o-frost)"/>
+        <polygon points="260,272 200,318 268,348" fill="var(--o-light)"/>
+        <polygon points="268,348 200,318 242,402" fill="var(--o-sky)"/>
+        <polygon points="200,318 200,420 242,402" fill="var(--o-light)"/>
+        <!-- chevron band -->
+        <polygon points="70,350 200,404 330,350 330,380 200,430 70,380" fill="var(--o-navy)" clip-path="url(#bodyClip)"/>
+        <polygon points="200,404 330,350 330,380 200,430" fill="var(--o-deep)" clip-path="url(#bodyClip)"/>
+
+        <g id="head">
+          <!-- facial disc and brows -->
+          <polygon points="200,180 150,140 100,172" fill="var(--o-light)"/>
+          <polygon points="200,180 100,172 98,222" fill="var(--o-frost)"/>
+          <polygon points="200,180 98,222 132,258" fill="var(--o-light)"/>
+          <polygon points="200,180 132,258 200,276" fill="var(--o-frost)"/>
+          <polygon points="200,180 250,140 300,172" fill="var(--o-sky)"/>
+          <polygon points="200,180 300,172 302,222" fill="var(--o-light)"/>
+          <polygon points="200,180 302,222 268,258" fill="var(--o-sky)"/>
+          <polygon points="200,180 268,258 200,276" fill="var(--o-light)"/>
+          <polygon points="200,184 112,128 150,166" fill="var(--o-white)"/>
+          <polygon points="200,184 288,128 250,166" fill="var(--o-pale)"/>
+
+          <g class="eye" data-cx="152" data-cy="192">
+            <circle cx="152" cy="192" r="42" fill="var(--o-white)" stroke="var(--o-deep)" stroke-width="4"/>
+            <path d="M152,150 A42,42 0 0 0 152,234 Z" fill="var(--o-frost)" opacity=".7"/>
+            <g clip-path="url(#eyeClipL)">
+              <g class="pupil">
+                <circle cx="152" cy="192" r="26" fill="var(--o-ink)"/>
+                <polygon points="140,178 150,176 144,186" fill="var(--o-white)"/>
+              </g>
+              <ellipse class="lid" cx="152" cy="192" rx="50" ry="48" fill="var(--o-blue)"/>
+              <!-- happy "^" eye, shown while #owl.happy -->
+              <g class="smile">
+                <circle cx="152" cy="192" r="44" fill="var(--o-sky)"/>
+                <path d="M128,204 L152,180 L176,204" fill="none" stroke="var(--o-ink)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+              </g>
+            </g>
+          </g>
+          <g class="eye" data-cx="248" data-cy="192">
+            <circle cx="248" cy="192" r="42" fill="var(--o-white)" stroke="var(--o-deep)" stroke-width="4"/>
+            <path d="M248,150 A42,42 0 0 1 248,234 Z" fill="var(--o-frost)" opacity=".7"/>
+            <g clip-path="url(#eyeClipR)">
+              <g class="pupil">
+                <circle cx="248" cy="192" r="26" fill="var(--o-ink)"/>
+                <polygon points="236,178 246,176 240,186" fill="var(--o-white)"/>
+              </g>
+              <ellipse class="lid" cx="248" cy="192" rx="50" ry="48" fill="var(--o-blue)"/>
+              <!-- happy "^" eye, shown while #owl.happy -->
+              <g class="smile">
+                <circle cx="248" cy="192" r="44" fill="var(--o-sky)"/>
+                <path d="M224,204 L248,180 L272,204" fill="none" stroke="var(--o-ink)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+              </g>
+            </g>
+          </g>
+
+          <!-- beak -->
+          <polygon points="200,214 214,238 200,268" fill="var(--o-navy)"/>
+          <polygon points="200,214 186,238 200,268" fill="var(--o-mid)"/>
+        </g>
+      </g>
+
+      <!-- wings pivot on their shoulder points (84,248) / (316,248) -->
+      <g id="wing-l" class="wing"><use href="#owl-wing-l" transform="translate(-18,4)"/></g>
+      <g id="wing-r" class="wing"><use href="#owl-wing-r" transform="translate(18,4)"/></g>
+
+      <!-- sparkles for the happy animation (hidden until #owl.happy) -->
+      <g id="owl-joy">
+        <g transform="translate(52,150)"><path class="spark" d="M0,-16 L5,0 L0,16 L-5,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(356,138)"><path class="spark" d="M0,-20 L6,0 L0,20 L-6,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(26,256)"><path class="spark" d="M0,-12 L4,0 L0,12 L-4,0 Z" fill="var(--o-blue)"/></g>
+        <g transform="translate(378,262)"><path class="spark" d="M0,-14 L4,0 L0,14 L-4,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(118,40)"><path class="spark" d="M0,-12 L4,0 L0,12 L-4,0 Z" fill="var(--o-mid)"/></g>
+        <g transform="translate(286,30)"><path class="spark" d="M0,-14 L4,0 L0,14 L-4,0 Z" fill="var(--o-blue)"/></g>
+      </g>
+    </g>
+    </g>
+  </g>
+  </g>
+</svg>

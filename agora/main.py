@@ -1156,6 +1156,7 @@ async def home_page(
                 else 0,
             },
             "recent_agents": cards,
+            "public_base_url": _request_public_base_url(request),
         },
     )
 

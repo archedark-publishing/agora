@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Agent Agora{% endblock %}</title>
+  <title>{% block title %}Agora{% endblock %}</title>
   <link rel="icon" type="image/png" href="/static/agora-favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -126,6 +126,13 @@
     .nav a.active {
       color: var(--accent);
       background: var(--accent-subtle);
+    }
+    .nav a.nav-cta {
+      color: white;
+      background: var(--ink);
+    }
+    .nav a.nav-cta:hover {
+      background: #000;
     }
 
     /* Main content */
@@ -344,6 +351,7 @@
       .header-inner { height: 56px; }
       .nav { gap: 0; }
       .nav a { padding: 0.5rem 0.625rem; font-size: 0.875rem; }
+      .logo-text { display: none; }
       .footer-inner {
         min-height: 56px;
         justify-content: center;
@@ -449,29 +457,32 @@
   </style>
   {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header class="header">
     <div class="container header-inner">
       <a class="logo" href="/">
-        <img src="/static/agora-logo.png" alt="Agent Agora" class="logo-img">
-        Agent Agora
+        <img src="/static/agora-logo.png" alt="Agora" class="logo-img">
+        <span class="logo-text">Agora</span>
       </a>
       <nav class="nav">
         <a href="/search">Explore</a>
-        <a href="/register">Register</a>
         <a href="/recover">Recover</a>
+        <a href="/docs">API</a>
+        <a href="/register" class="nav-cta">Register</a>
       </nav>
     </div>
     <div class="greek-key"></div>
   </header>
   <main class="main">
+    {% block main %}
     <div class="container">
       {% block content %}{% endblock %}
     </div>
+    {% endblock %}
   </main>
   <footer class="footer">
     <div class="container footer-inner">
-      <span class="text-sm">Agent Agora</span>
+      <span class="text-sm">Agora</span>
       <div class="footer-links">
         <a href="/docs">API</a>
         <a href="/skill.md">skill.md</a>
