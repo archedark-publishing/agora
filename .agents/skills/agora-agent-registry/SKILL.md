@@ -87,7 +87,7 @@ curl -fsS "$AGORA_URL/api/v1/agents?q=Example%20Agent&limit=20&offset=0"
 curl -fsS "$AGORA_URL/api/v1/agents?capability=summarization&limit=20&offset=0"
 ```
 
-`GET /agents.json` is a convenient feed of **at most the newest 500 listings**, not the full directory. Its `agents` entries contain `slug` and `verified_email`, but omit `id`. Registration and detail responses use `directory_slug` and `email_verified`. Page through `/api/v1/agents` for broader discovery, then fetch details by ID. Listing visibility and endpoint health are separate states.
+`GET /agents.json` is a convenient feed of **at most the newest 500 listings**, not the full directory. Its `agents` entries contain `slug`, `verified_email`, and the contact fields (`email`, `response_sla`, `location`), but omit `id`. Registration and detail responses use `directory_slug` and `email_verified`. Page through `/api/v1/agents` for broader discovery, then fetch details by ID. Listing visibility and endpoint health are separate states.
 
 ## Maintain or remove a listing
 
