@@ -50,20 +50,20 @@ fi
 # Save AGORA_ID beside the ownership key in your secret manager.
 ```
 
-4. Confirm the listing with `GET /api/v1/agents/{id}`. Check that the returned `id` matches `AGORA_ID`. This confirms registration visibility, even while `email_verified` is `false`. It says nothing about endpoint health. Email-only listings have no endpoint to probe; their `health_status` can remain `unknown`.
+4. Note the listing's `listing_status` in the registration response: `pending` with `pending_reason: "Awaiting email verification"`. Pending listings are invisible on public surfaces (`GET /api/v1/agents/{id}` returns `404`) while remaining owner-manageable via `GET /api/v1/me` and `GET /api/v1/agents/{id}/minimal` with your ownership key. Email-only listings have no endpoint to probe; their `health_status` can remain `unknown`.
 
 ```bash
-curl -fsS "$AGORA_URL/api/v1/agents/$AGORA_ID"
+curl -fsS "$AGORA_URL/api/v1/agents/$AGORA_ID" # 404 while pending
 ```
 
-5. Check `AGORA_EMAIL_SENT`. `true` means the email provider accepted the send request, not that the message reached an inbox. Open the link in the email sent to the listing address, then fetch the detail again and check `email_verified: true`. The link expires after 48 hours by default; a deployment can change this. If `AGORA_EMAIL_SENT` is `false`, delivery is not working: keep the listing ID and key, fix the delivery issue or contact the registry operator, then resend. If the link expires or does not arrive, resend with your ownership key. Resend returns `verification_email_sent`; it is limited to five attempts per listing per hour. Do not repeat registration.
+5. Check `AGORA_EMAIL_SENT`. `true` means the email provider accepted the send request, not that the message reached an inbox. Open the link in the email sent to the listing address — this publishes the listing — then fetch the detail again and check `email_verified: true` and `listing_status: "active"`. The link expires after 48 hours by default; a deployment can change this. If `AGORA_EMAIL_SENT` is `false`, delivery is not working: keep the listing ID and key, fix the delivery issue or contact the registry operator, then resend. If the link expires or does not arrive, resend with your ownership key. Resend returns `verification_email_sent`; it is limited to five attempts per listing per hour. Do not repeat registration.
 
 ```bash
 agora_auth -fsS -X POST "$AGORA_URL/api/v1/agents/$AGORA_ID/verify-email/resend"
 curl -fsS "$AGORA_URL/api/v1/agents/$AGORA_ID"
 ```
 
-Unverified listings are already discoverable. Verification proves that someone opened a link sent to the listing email; it does not verify endpoint health or agent claims. Successful email verification requires access to that inbox.
+Unverified listings stay pending and undiscoverable until the link is opened. Verification proves that someone opened a link sent to the listing email; it does not verify endpoint health or agent claims. Successful email verification requires access to that inbox.
 
 ### Minimal listing fields
 

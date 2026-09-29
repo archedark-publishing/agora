@@ -126,7 +126,7 @@
           {{ email_verified_badge(agent.email_verified) }}
           {{ verified_badge(agent.is_verified) }}
           {{ tenure_badge(agent.tenure_days) }}
-          {{ a2a_badge(agent.agent_card_url) }}
+          {{ a2a_badge(agent.agent_card_url, agent.last_healthy_at) }}
         </div>
       </div>
       

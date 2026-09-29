@@ -57,6 +57,13 @@ async def _set_agent_profile(
             agent.health_status = "healthy"
             agent.last_health_check = now_utc
             agent.last_healthy_at = now_utc
+        else:
+            # Full registration now records a successful preflight check, so
+            # "not healthy" must explicitly clear that evidence to keep the
+            # pre-gating test invariant: no health history on record.
+            agent.health_status = "unknown"
+            agent.last_health_check = None
+            agent.last_healthy_at = None
         if erc8004_verified:
             agent.erc8004_verified = True
             agent.econ_id = econ_id or "eip155:1:0x1234567890abcdef1234567890abcdef12345678:22"

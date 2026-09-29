@@ -59,9 +59,15 @@ async def client_with_fake_db(monkeypatch) -> httpx.AsyncClient:
     async def _no_erc8004_lookup(_url: str, econ_id: str | None) -> tuple[str | None, bool]:
         return econ_id, False
 
+    async def _passing_preflight(_url: str) -> dict[str, object]:
+        return {"status": "pass", "detail": None}
+
     monkeypatch.setattr(main_module, "_enforce_registration_rate_limits", _no_rate_limit)
     monkeypatch.setattr(main_module, "verify_commitments_document", _no_commitment_verification)
     monkeypatch.setattr(main_module, "_compute_erc8004_verification", _no_erc8004_lookup)
+    # Proof-of-life gating: preflight passes so registrations land active
+    # and stay visible on public surfaces (mirrors the integration conftest).
+    monkeypatch.setattr(main_module, "_run_preflight_health_check", _passing_preflight)
     monkeypatch.setattr(
         "agora.url_safety._resolve_ips",
         lambda _hostname: [ipaddress.ip_address("93.184.216.34")],

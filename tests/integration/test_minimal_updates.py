@@ -17,6 +17,7 @@ from tests.integration.test_lifecycle import build_payload
 from tests.integration.test_minimal_directory import (
     _minimal_payload,
     _register_minimal,
+    _verify_minimal,
     capture_verification_email,
 )
 
@@ -29,6 +30,7 @@ def _path(agent):
 
 async def test_profile_patch_keeps_identity_and_updates_public_feeds(client, capture_verification_email):
     agent = await _register_minimal(client)
+    await _verify_minimal(client, agent, capture_verification_email)
     changes = {"name": "Ada Updated", "description": None, "response_sla": None,
                "location": "Boston", "capabilities": []}
     response = await client.patch(_path(agent), json=changes, headers=OWNER)
@@ -64,6 +66,7 @@ async def test_owner_routes_require_matching_key(client, capture_verification_em
 
 async def test_profile_patch_is_limited_to_twenty_per_key(client, capture_verification_email):
     agent = await _register_minimal(client)
+    await _verify_minimal(client, agent, capture_verification_email)
     for index in range(20):
         response = await client.patch(_path(agent), json={"name": f"Edit {index}"}, headers=OWNER)
         assert response.status_code == 200, response.text
@@ -131,6 +134,7 @@ async def test_pending_email_requests_and_resends_share_five_per_listing(client,
 ])
 async def test_patch_rejects_invalid_or_unsupported_fields(client, capture_verification_email, payload):
     agent = await _register_minimal(client)
+    await _verify_minimal(client, agent, capture_verification_email)
     response = await client.patch(_path(agent), json=payload, headers=OWNER)
     assert response.status_code == 400, response.text
     detail = (await client.get(f"/api/v1/agents/{agent['id']}")).json()
@@ -198,6 +202,7 @@ async def test_latest_request_and_cancel_invalidate_links(client, capture_verifi
 
 async def test_failed_delivery_can_be_retried_without_losing_contact(client, capture_verification_email, monkeypatch):
     agent = await _register_minimal(client)
+    await _verify_minimal(client, agent, capture_verification_email)
     send = main_module._send_verification_email
     async def fail(**kwargs):
         return False
@@ -218,6 +223,7 @@ async def test_failed_delivery_can_be_retried_without_losing_contact(client, cap
 
 async def test_expired_pending_link_cannot_replace_contact(client, capture_verification_email, monkeypatch):
     agent = await _register_minimal(client)
+    await _verify_minimal(client, agent, capture_verification_email)
     monkeypatch.setattr(main_module.settings, "email_verification_ttl_hours", -1)
     response = await client.patch(_path(agent), headers=OWNER, json={"email": "expired@example.com"})
     assert response.status_code == 200, response.text
@@ -227,6 +233,7 @@ async def test_expired_pending_link_cannot_replace_contact(client, capture_verif
 
 async def test_email_collision_checked_at_request_and_confirmation(client, capture_verification_email):
     agent = await _register_minimal(client)
+    await _verify_minimal(client, agent, capture_verification_email)
     await _register_minimal(client, _minimal_payload("Other", "taken@example.com"), "other-key")
     conflict = await client.patch(_path(agent), headers=OWNER, json={"email": "TAKEN@example.com"})
     assert conflict.status_code == 409, conflict.text
@@ -242,6 +249,8 @@ async def test_email_collision_checked_at_request_and_confirmation(client, captu
 async def test_concurrent_confirmations_have_only_one_winner(client, capture_verification_email):
     first = await _register_minimal(client)
     second = await _register_minimal(client, _minimal_payload("Second", "second@example.com"), "second-key")
+    await _verify_minimal(client, first, capture_verification_email, email_index=0)
+    await _verify_minimal(client, second, capture_verification_email, email_index=1)
     links = []
     for agent, headers in ((first, OWNER), (second, {"X-API-Key": "second-key"})):
         response = await client.patch(_path(agent), headers=headers, json={"email": "shared@example.com"})

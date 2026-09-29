@@ -51,6 +51,18 @@ def _token_from_url(verify_url: str) -> str:
     return verify_url.split("token=", 1)[1]
 
 
+async def _verify_minimal(client, body, capture_verification_email, email_index=-1) -> None:
+    """Click the verification link for a minimal registration.
+
+    Proof-of-life gating keeps minimal listings pending (invisible) until
+    the inbox owner opens the signed link; this publishes the listing.
+    ``email_index`` selects which captured email to use (default: latest).
+    """
+    token = _token_from_url(capture_verification_email[email_index]["verify_url"])
+    response = await client.get(f"/verify-email?token={token}")
+    assert response.status_code == 200, response.text
+
+
 async def test_minimal_registration_happy_path(client, capture_verification_email) -> None:
     body = await _register_minimal(client)
     assert body["name"] == "Ada"
@@ -58,6 +70,8 @@ async def test_minimal_registration_happy_path(client, capture_verification_emai
     assert body["email"] == "ada@example.com"
     assert body["email_verified"] is False
     assert body["verification_email_sent"] is True
+    assert body["listing_status"] == "pending"
+    assert body["pending_reason"] == "Awaiting email verification"
     assert "email_challenge" not in body
 
     assert len(capture_verification_email) == 1
@@ -66,12 +80,18 @@ async def test_minimal_registration_happy_path(client, capture_verification_emai
     assert sent["agent_name"] == "Ada"
     assert sent["verify_url"].startswith("https://the-agora.dev/verify-email?token=")
 
+    # Pending listings are invisible on public surfaces...
+    detail = await client.get(f"/api/v1/agents/{body['id']}")
+    assert detail.status_code == 404
+
+    # ...until the verification link is opened.
+    await _verify_minimal(client, body, capture_verification_email)
     detail = await client.get(f"/api/v1/agents/{body['id']}")
     assert detail.status_code == 200
     payload = detail.json()
     assert payload["email"] == "ada@example.com"
     assert payload["response_sla"] == "within 4 hours"
-    assert payload["email_verified"] is False
+    assert payload["email_verified"] is True
     assert payload["directory_slug"] == "ada"
     assert "url" not in payload  # email-only listings have no URL
 
@@ -205,13 +225,15 @@ async def test_resend_verification_email_already_verified(
     assert len(capture_verification_email) == 1
 
 
-async def test_agents_json_feed(client) -> None:
-    await _register_minimal(
+async def test_agents_json_feed(client, capture_verification_email) -> None:
+    one = await _register_minimal(
         client, _minimal_payload(name="Feed One", email="one@example.com"), api_key="feed-1"
     )
-    await _register_minimal(
+    await _verify_minimal(client, one, capture_verification_email)
+    two = await _register_minimal(
         client, _minimal_payload(name="Feed Two", email="two@example.com"), api_key="feed-2"
     )
+    await _verify_minimal(client, two, capture_verification_email)
 
     response = await client.get("/agents.json")
     assert response.status_code == 200
@@ -224,15 +246,18 @@ async def test_agents_json_feed(client) -> None:
     assert entry["response_sla"] == "within 4 hours"
     assert entry["location"] is None
     assert entry["capabilities"] == ["email", "scheduling"]
-    assert entry["verified_email"] is False
+    assert entry["verified_email"] is True
     assert "last_seen" in entry
 
 
-async def test_minimal_registration_location_optional(client) -> None:
+async def test_minimal_registration_location_optional(
+    client, capture_verification_email
+) -> None:
     payload = _minimal_payload(name="Local Agent", email="local@example.com")
     payload["location"] = "Philadelphia, PA"
     body = await _register_minimal(client, payload, api_key="location-key")
     assert body["id"]
+    await _verify_minimal(client, body, capture_verification_email)
 
     detail = await client.get(f"/api/v1/agents/{body['id']}")
     assert detail.status_code == 200
@@ -248,8 +273,11 @@ async def test_minimal_registration_location_optional(client) -> None:
     assert "Philadelphia, PA" in home.text
 
 
-async def test_home_page_renders_minimal_listings(client) -> None:
-    await _register_minimal(client, api_key="home-key")
+async def test_home_page_renders_minimal_listings(
+    client, capture_verification_email
+) -> None:
+    body = await _register_minimal(client, api_key="home-key")
+    await _verify_minimal(client, body, capture_verification_email)
     response = await client.get("/")
     assert response.status_code == 200
     assert "ada@example.com" in response.text
@@ -270,9 +298,11 @@ async def test_email_only_listing_shows_email_only_badge(
         name="URL Badge Agent", email="url-badge@example.com"
     )
     url_payload["url"] = "https://example.com/url-badge-agent"
-    await _register_minimal(
+    url_agent = await _register_minimal(
         client, payload=url_payload, api_key="url-badge-key"
     )
+    await _verify_minimal(client, email_only, capture_verification_email, email_index=0)
+    await _verify_minimal(client, url_agent, capture_verification_email, email_index=1)
 
     response = await client.get("/")
     assert response.status_code == 200
@@ -312,13 +342,15 @@ async def test_health_rate_counts_live_email_only_listings(
     assert heartbeat.status_code == 200, heartbeat.text
 
     # Registered but never heartbeated: email-only, but not known live.
-    await _register_minimal(
+    quiet = await _register_minimal(
         client,
         payload=_minimal_payload(
             name="Quiet Email Agent", email="quiet-email@example.com"
         ),
         api_key="quiet-email-key",
     )
+    await _verify_minimal(client, live, capture_verification_email, email_index=0)
+    await _verify_minimal(client, quiet, capture_verification_email, email_index=1)
 
     response = await client.get("/")
     assert response.status_code == 200
@@ -330,13 +362,14 @@ async def test_health_rate_still_counts_checked_agents(
 ) -> None:
     from tests.integration.test_search_page import set_agent_health_state
 
-    await _register_minimal(
+    checked = await _register_minimal(
         client,
         payload=_minimal_payload(
             name="Checked Agent", email="checked@example.com"
         ),
         api_key="checked-key",
     )
+    await _verify_minimal(client, checked, capture_verification_email)
     await set_agent_health_state(
         name="Checked Agent",
         health_status="healthy",

@@ -70,6 +70,7 @@ class Agent(Base):
         Index("idx_agents_oatr_issuer_id", "oatr_issuer_id"),
         Index("idx_agents_email", "email"),
         Index("uq_agents_email_lower", func.lower(text("email")), unique=True),
+        Index("idx_agents_listing_status", "listing_status"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -151,6 +152,17 @@ class Agent(Base):
 
     # Ownership + metadata
     owner_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Proof-of-life gating: a listing goes public only after demonstrating
+    # the thing is real — a reachable agent card (URL path) or a clicked
+    # email verification link (email-only path). 'pending' listings exist
+    # and are owner-manageable but invisible on every public surface.
+    listing_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'active'"),
+        default="active",
+    )
+    pending_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

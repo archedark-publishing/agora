@@ -44,8 +44,10 @@
 {% endmacro %}
 
 {# A2A compatibility badge #}
-{% macro a2a_badge(agent_card_url) %}
-  {% if agent_card_url %}
+{% macro a2a_badge(agent_card_url, last_healthy_at) %}
+  {# Proof of life: the badge means we actually fetched a card from this
+     agent at some point, not just that a card URL was claimed. #}
+  {% if agent_card_url and last_healthy_at %}
     <span class="badge" style="color: var(--accent); background: var(--accent-subtle);">
       A2A Compatible
     </span>
