@@ -46,8 +46,11 @@ def build_agent_card_probe_urls(agent_url: str) -> list[str]:
 
     Probe order:
     1. `/.well-known/agent-card.json` on the agent origin (primary contract target)
-    2. The registered `agent.url` itself (query/fragment removed)
-    3. Root `/` on the agent origin
+    2. `/.well-known/agent.json` on the agent origin (registration fetch location;
+       kept in the same list so registration and health checks agree on where a
+       card may live)
+    3. The registered `agent.url` itself (query/fragment removed)
+    4. Root `/` on the agent origin
     """
 
     parts = urlsplit(agent_url)
@@ -64,6 +67,7 @@ def build_agent_card_probe_urls(agent_url: str) -> list[str]:
 
     candidates = [
         f"{origin}/.well-known/agent-card.json",
+        f"{origin}/.well-known/agent.json",
         normalized_agent_url,
         f"{origin}/",
     ]

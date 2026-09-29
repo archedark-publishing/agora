@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -18,6 +19,7 @@ from sqlalchemy import text
 
 import agora.main as main_module
 from agora.database import AsyncSessionLocal
+from agora.main import _run_preflight_health_check as _real_preflight_health_check
 from tests.integration.test_lifecycle import build_payload
 
 
@@ -349,3 +351,110 @@ async def test_backfill_migration_marks_only_unproven_listings_pending() -> None
         "pending",
         "Backfilled: never verified or health-checked",
     )
+
+
+# ---------------------------------------------------------------------------
+# Bug regressions
+# ---------------------------------------------------------------------------
+
+
+async def test_email_change_before_initial_verification_still_publishes(
+    client, capture_verification_email
+) -> None:
+    """Bug 1: confirming an email change before the initial verification click
+    must publish the listing, not strand it verified-but-pending with no way
+    out (resend says "already verified", health retry rejects minimal
+    listings)."""
+    response = await client.post(
+        "/api/v1/agents/minimal",
+        json=_minimal_payload("Email Changer", "changer-old@example.com"),
+        headers={"X-API-Key": "changer-key"},
+    )
+    assert response.status_code == 201, response.text
+    agent_id = response.json()["id"]
+    assert response.json()["listing_status"] == "pending"
+
+    # Owner corrects the address before clicking the initial verification link.
+    patch = await client.patch(
+        f"/api/v1/agents/{agent_id}/minimal",
+        json={"email": "changer-new@example.com"},
+        headers={"X-API-Key": "changer-key"},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["pending_email"] == "changer-new@example.com"
+
+    # The second captured email is the change-confirmation link.
+    assert len(capture_verification_email) == 2
+    verify_url = capture_verification_email[1]["verify_url"]
+    token = verify_url.split("token=")[1]
+    verify = await client.get(f"/verify-email?token={token}")
+    assert verify.status_code == 200
+
+    # Verified AND public — no dead end.
+    assert agent_id in await _public_ids(client)
+    assert (await client.get(f"/api/v1/agents/{agent_id}")).status_code == 200
+
+    owner = await client.get(
+        f"/api/v1/agents/{agent_id}/minimal", headers={"X-API-Key": "changer-key"}
+    )
+    assert owner.status_code == 200
+    assert owner.json()["listing_status"] == "active"
+    assert owner.json()["pending_reason"] is None
+    assert owner.json()["email_verified"] is True
+    assert owner.json()["email"] == "changer-new@example.com"
+
+
+async def test_registration_with_card_only_at_agent_json_goes_active(
+    client, monkeypatch
+) -> None:
+    """Bug 2: registration fetches the card from /.well-known/agent.json, so
+    the proof-of-life probe must cover the same location. A card served ONLY
+    there must land active, not pending."""
+    host = "wellknown-card.example.com"
+    card = {
+        "protocolVersion": "0.3.0",
+        "name": "Well-Known Agent",
+        "description": "Serves its card only at /.well-known/agent.json",
+        "url": f"https://{host}/",
+        "version": "1.0.0",
+        "capabilities": {"streaming": False},
+        "skills": [{"id": "echo", "name": "Echo"}],
+    }
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, payload: dict | None = None):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = {"content-type": "application/json"}
+
+        def json(self) -> dict:
+            if self._payload is None:
+                raise ValueError("no JSON body")
+            return self._payload
+
+    real_get = httpx.AsyncClient.get
+
+    async def _fake_get(self, url, **kwargs):
+        url_str = str(url)
+        if host in url_str:
+            if url_str.endswith("/.well-known/agent.json"):
+                return _FakeResponse(200, card)
+            return _FakeResponse(404)
+        return await real_get(self, url, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_get)
+    # Restore the real proof-of-life check (the integration conftest stubs it).
+    monkeypatch.setattr(
+        main_module, "_run_preflight_health_check", _real_preflight_health_check
+    )
+
+    response = await client.post(
+        "/api/v1/agents",
+        json={"agent_card_url": f"https://{host}", "name": "Well-Known Agent"},
+        headers={"X-API-Key": "wellknown-key"},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["listing_status"] == "active", body["pending_reason"]
+    assert body["pending_reason"] is None
+    assert body["id"] in await _public_ids(client)

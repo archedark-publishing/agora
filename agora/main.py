@@ -3915,6 +3915,10 @@ async def verify_email_link(
         agent.email_generation = token_urlsafe(32)
         agent.agent_card = {**agent.agent_card, "email": agent.email}
         agent.email_verified = True
+        # The inbox owner clicked: proof of life for this listing. Publish it,
+        # even if the listing was still pending its initial verification.
+        agent.listing_status = "active"
+        agent.pending_reason = None
         try:
             await session.commit()
         except IntegrityError:
@@ -3976,6 +3980,11 @@ async def resend_verification_email(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     if agent.email_verified:
+        if agent.listing_status != "active":
+            # Self-heal: proof of life was already demonstrated; make it public.
+            agent.listing_status = "active"
+            agent.pending_reason = None
+            await session.commit()
         return {
             "id": str(agent.id),
             "email": agent.email,
