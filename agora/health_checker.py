@@ -49,8 +49,18 @@ def build_agent_card_probe_urls(agent_url: str) -> list[str]:
     2. `/.well-known/agent.json` on the agent origin (registration fetch location;
        kept in the same list so registration and health checks agree on where a
        card may live)
-    3. The registered `agent.url` itself (query/fragment removed)
-    4. Root `/` on the agent origin
+    3. `/.well-known/agent-card.json` under the agent URL's own path
+    4. `/.well-known/agent.json` under the agent URL's own path
+    5. The registered `agent.url` itself (query/fragment removed)
+    6. Root `/` on the agent origin
+
+    Entries 3-4 exist because registration resolves the card path-relative to
+    `agent_card_url` (``urljoin(f"{base}/", ".well-known/agent.json")``). A card
+    served only under a path would pass registration validation but fail every
+    health check if the probes only covered origin-root locations, stranding the
+    listing pending forever. Probing the same path-relative locations keeps one
+    canonical list shared by the registration preflight, the retry endpoint,
+    and the background checker.
     """
 
     parts = urlsplit(agent_url)
@@ -62,17 +72,23 @@ def build_agent_card_probe_urls(agent_url: str) -> list[str]:
         port_fragment = f":{port}"
 
     origin = f"{scheme}://{host}{port_fragment}"
-    normalized_path = parts.path or "/"
-    normalized_agent_url = f"{origin}{normalized_path}"
+    raw_path = parts.path or "/"
+    # Trailing slash ensured so concatenation matches the urljoin semantics
+    # registration uses to resolve the card location.
+    path_prefix = raw_path if raw_path.endswith("/") else f"{raw_path}/"
+    normalized_agent_url = f"{origin}{raw_path}"
 
     candidates = [
         f"{origin}/.well-known/agent-card.json",
         f"{origin}/.well-known/agent.json",
+        f"{origin}{path_prefix}.well-known/agent-card.json",
+        f"{origin}{path_prefix}.well-known/agent.json",
         normalized_agent_url,
         f"{origin}/",
     ]
 
-    # Preserve order while removing duplicates (for example when agent.url is "/").
+    # Preserve order while removing duplicates (for example when the agent URL
+    # path is "/" the path-relative entries duplicate the origin-level ones).
     deduped: list[str] = []
     for candidate in candidates:
         if candidate not in deduped:

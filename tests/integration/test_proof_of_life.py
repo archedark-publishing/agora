@@ -458,3 +458,64 @@ async def test_registration_with_card_only_at_agent_json_goes_active(
     assert body["listing_status"] == "active", body["pending_reason"]
     assert body["pending_reason"] is None
     assert body["id"] in await _public_ids(client)
+
+
+async def test_registration_with_card_only_at_path_relative_well_known_goes_active(
+    client, monkeypatch
+) -> None:
+    """Bug 2 remainder: registration resolves the card path-relative to
+    agent_card_url (urljoin(f"{base}/", ".well-known/agent.json")). A card
+    served ONLY at that path-relative location must land active — the
+    proof-of-life probe has to cover the same location registration fetched,
+    or a valid registration passes validation and then fails every health
+    check, stranding the listing pending forever."""
+    host = "path-card.example.com"
+    card = {
+        "protocolVersion": "0.3.0",
+        "name": "Path Card Agent",
+        "description": "Serves its card only under a path-relative well-known URL",
+        "url": f"https://{host}/agents/demo",
+        "version": "1.0.0",
+        "capabilities": {"streaming": False},
+        "skills": [{"id": "echo", "name": "Echo"}],
+    }
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, payload: dict | None = None):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = {"content-type": "application/json"}
+
+        def json(self) -> dict:
+            if self._payload is None:
+                raise ValueError("no JSON body")
+            return self._payload
+
+    real_get = httpx.AsyncClient.get
+
+    async def _fake_get(self, url, **kwargs):
+        url_str = str(url)
+        if host in url_str:
+            # The ONLY place this agent serves its card: exactly where
+            # registration resolves it relative to agent_card_url.
+            if url_str == f"https://{host}/agents/demo/.well-known/agent.json":
+                return _FakeResponse(200, card)
+            return _FakeResponse(404)
+        return await real_get(self, url, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_get)
+    # Restore the real proof-of-life check (the integration conftest stubs it).
+    monkeypatch.setattr(
+        main_module, "_run_preflight_health_check", _real_preflight_health_check
+    )
+
+    response = await client.post(
+        "/api/v1/agents",
+        json={"agent_card_url": f"https://{host}/agents/demo", "name": "Path Card Agent"},
+        headers={"X-API-Key": "pathcard-key"},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["listing_status"] == "active", body["pending_reason"]
+    assert body["pending_reason"] is None
+    assert body["id"] in await _public_ids(client)

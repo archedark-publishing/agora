@@ -59,16 +59,52 @@ async def _noop_pin_hostname_resolution(_hostname: str, _pinned_ip: str):
     yield
 
 
+def _patch_outbound_safety(monkeypatch) -> None:
+    """Make outbound URL-safety checks hermetic for every module in a sweep.
+
+    ``_check_single_agent`` fans out to ERC-8004 discovery and agent.json
+    manifest verification, and each of ``agora.health_checker``,
+    ``agora.erc8004`` and ``agora.agent_json`` imports its own
+    ``assert_url_safe_for_outbound`` / ``pin_hostname_resolution`` binding.
+    Patching only one module leaves the tests depending on real DNS for
+    example.com resolving to a public IP — in sandboxes where it resolves
+    privately the unpatched fetches silently never happen and attempt logs
+    (and verification outcomes) diverge.
+    """
+
+    def _safe_target(_url: str, allow_private: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(hostname="example.com", pinned_ip="93.184.216.34")
+
+    for _module in ("agora.health_checker", "agora.erc8004", "agora.agent_json"):
+        monkeypatch.setattr(f"{_module}.assert_url_safe_for_outbound", _safe_target)
+        monkeypatch.setattr(f"{_module}.pin_hostname_resolution", _noop_pin_hostname_resolution)
+
+
 def test_build_agent_card_probe_urls_orders_and_dedupes() -> None:
     assert build_agent_card_probe_urls("https://example.com/agents/demo?x=1#section") == [
         "https://example.com/.well-known/agent-card.json",
+        "https://example.com/.well-known/agent.json",
+        "https://example.com/agents/demo/.well-known/agent-card.json",
+        "https://example.com/agents/demo/.well-known/agent.json",
         "https://example.com/agents/demo",
         "https://example.com/",
     ]
     assert build_agent_card_probe_urls("https://example.com/") == [
         "https://example.com/.well-known/agent-card.json",
+        "https://example.com/.well-known/agent.json",
         "https://example.com/",
     ]
+
+
+def test_build_agent_card_probe_urls_includes_path_relative_well_known() -> None:
+    """Registration resolves the card path-relative to agent_card_url
+    (urljoin(f"{base}/", ".well-known/agent.json")), so the probe list must
+    include the same path-relative locations — otherwise a card served only
+    under a path passes registration validation but fails every health
+    check and the listing is stranded pending."""
+    urls = build_agent_card_probe_urls("https://example.com/agents/demo")
+    assert urls[2] == "https://example.com/agents/demo/.well-known/agent-card.json"
+    assert urls[3] == "https://example.com/agents/demo/.well-known/agent.json"
 
 
 async def test_check_single_agent_uses_fallback_when_well_known_fails(monkeypatch) -> None:
@@ -82,14 +118,7 @@ async def test_check_single_agent_uses_fallback_when_well_known_fails(monkeypatc
             return httpx.Response(200, json=_valid_card("https://example.com/agents/demo"), request=request)
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -104,6 +133,9 @@ async def test_check_single_agent_uses_fallback_when_well_known_fails(monkeypatc
     assert healthy is True
     assert attempts == [
         "/.well-known/agent-card.json",
+        "/.well-known/agent.json",
+        "/agents/demo/.well-known/agent-card.json",
+        "/agents/demo/.well-known/agent.json",
         "/agents/demo",
         "/.well-known/agent-registration.json",
         "/.well-known/agent.json",
@@ -125,14 +157,7 @@ async def test_check_single_agent_refreshes_protocol_version_from_fetched_card(m
             )
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     agent.protocol_version = "0.3.0"
@@ -157,14 +182,7 @@ async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypat
         attempts.append(request.url.path)
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     previous_last_healthy = datetime.now(tz=timezone.utc)
@@ -182,6 +200,9 @@ async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypat
     assert healthy is False
     assert attempts == [
         "/.well-known/agent-card.json",
+        "/.well-known/agent.json",
+        "/agents/demo/.well-known/agent-card.json",
+        "/agents/demo/.well-known/agent.json",
         "/agents/demo",
         "/",
         "/.well-known/agent-registration.json",
@@ -214,14 +235,7 @@ async def test_check_single_agent_verifies_or_populates_econ_id_from_erc8004_reg
             )
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     now_utc = datetime.now(tz=timezone.utc)
 
@@ -264,14 +278,7 @@ async def test_check_single_agent_recomputes_commitment_verification(monkeypatch
     async def _fake_verify_commitments_document(**kwargs) -> bool:
         return bool(kwargs["did_verified"]) and kwargs["did"] == "did:web:commitments.example"
 
-    monkeypatch.setattr(
-        "agora.health_checker.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.health_checker.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
     monkeypatch.setattr("agora.health_checker.verify_commitments_document", _fake_verify_commitments_document)
 
     agent = _agent(
@@ -316,14 +323,7 @@ async def test_check_single_agent_verifies_agent_json_manifest(monkeypatch) -> N
             )
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.agent_json.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -360,14 +360,7 @@ async def test_check_single_agent_fails_agent_json_domain_mismatch(monkeypatch) 
             )
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.agent_json.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -410,14 +403,7 @@ async def test_check_single_agent_fails_agent_json_did_mismatch(monkeypatch) -> 
             )
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.agent_json.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
@@ -442,14 +428,7 @@ async def test_check_single_agent_skips_when_agent_json_missing(monkeypatch) -> 
             return httpx.Response(200, json=_valid_card("https://example.com/agents/demo"), request=request)
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(
-        "agora.agent_json.assert_url_safe_for_outbound",
-        lambda _url, allow_private=False: SimpleNamespace(
-            hostname="example.com",
-            pinned_ip="93.184.216.34",
-        ),
-    )
-    monkeypatch.setattr("agora.agent_json.pin_hostname_resolution", _noop_pin_hostname_resolution)
+    _patch_outbound_safety(monkeypatch)
 
     agent = _agent("https://example.com/agents/demo")
     now_utc = datetime.now(tz=timezone.utc)
