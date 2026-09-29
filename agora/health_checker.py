@@ -34,23 +34,15 @@ class HealthCheckSummary:
     skipped_count: int = 0
 
 
-def build_agent_card_probe_url(agent_url: str) -> str:
+def build_agent_card_probe_url(agent_url: str, agent_card_url: str | None = None) -> str:
     """Build the primary canonical health probe URL for an agent origin."""
 
-    return build_agent_card_probe_urls(agent_url)[0]
+    return build_agent_card_probe_urls(agent_url, agent_card_url)[0]
 
 
-def build_agent_card_probe_urls(agent_url: str) -> list[str]:
-    """
-    Build ordered health probe URLs for an agent.
-
-    Probe order:
-    1. `/.well-known/agent-card.json` on the agent origin (primary contract target)
-    2. The registered `agent.url` itself (query/fragment removed)
-    3. Root `/` on the agent origin
-    """
-
-    parts = urlsplit(agent_url)
+def _candidates_for_base(base_url: str) -> list[str]:
+    """Build the six ordered probe candidates for a single base URL."""
+    parts = urlsplit(base_url)
     host = parts.hostname or ""
     scheme = parts.scheme or "https"
     port = parts.port
@@ -59,16 +51,67 @@ def build_agent_card_probe_urls(agent_url: str) -> list[str]:
         port_fragment = f":{port}"
 
     origin = f"{scheme}://{host}{port_fragment}"
-    normalized_path = parts.path or "/"
-    normalized_agent_url = f"{origin}{normalized_path}"
+    raw_path = parts.path or "/"
+    # Trailing slash ensured so concatenation matches the urljoin semantics
+    # registration uses to resolve the card location.
+    path_prefix = raw_path if raw_path.endswith("/") else f"{raw_path}/"
+    normalized_base_url = f"{origin}{raw_path}"
 
-    candidates = [
+    return [
         f"{origin}/.well-known/agent-card.json",
-        normalized_agent_url,
+        f"{origin}/.well-known/agent.json",
+        f"{origin}{path_prefix}.well-known/agent-card.json",
+        f"{origin}{path_prefix}.well-known/agent.json",
+        normalized_base_url,
         f"{origin}/",
     ]
 
-    # Preserve order while removing duplicates (for example when agent.url is "/").
+
+def build_agent_card_probe_urls(agent_url: str, agent_card_url: str | None = None) -> list[str]:
+    """
+    Build ordered health probe URLs for an agent.
+
+    `agent_url` is the card's self-asserted endpoint (where clients go).
+    `agent_card_url` is the URL the card was actually fetched from at
+    registration -- the proven location. The two can differ: a card fetched at
+    `https://example.com/agents/demo/.well-known/agent.json` may declare
+    `"url": "https://example.com/rpc"`. Probing only the endpoint would miss
+    the proven card location and strand the listing pending forever, so the
+    proven-location candidates come first.
+
+    When `agent_card_url` is given and differs from `agent_url`, the endpoint
+    candidates are appended after the proven-location candidates (the endpoint
+    is still where clients go, so it stays a reasonable secondary target).
+    When the two are identical (or no card URL is given), the result is exactly
+    the single-base list -- no behavior change for the common case.
+
+    Probe order per base:
+    1. `/.well-known/agent-card.json` on the base origin (primary contract target)
+    2. `/.well-known/agent.json` on the base origin (registration fetch location;
+       kept in the same list so registration and health checks agree on where a
+       card may live)
+    3. `/.well-known/agent-card.json` under the base URL's own path
+    4. `/.well-known/agent.json` under the base URL's own path
+    5. The base URL itself (query/fragment removed)
+    6. Root `/` on the base origin
+
+    Entries 3-4 exist because registration resolves the card path-relative to
+    `agent_card_url` (`urljoin(f"{base}/", ".well-known/agent.json")`). A card
+    served only under a path would pass registration validation but fail every
+    health check if the probes only covered origin-root locations, stranding the
+    listing pending forever. Probing the same path-relative locations keeps one
+    canonical list shared by the registration preflight, the retry endpoint,
+    and the background checker.
+    """
+
+    primary_base = agent_card_url or agent_url
+    candidates = _candidates_for_base(primary_base)
+    if agent_card_url and agent_card_url.rstrip("/") != agent_url.rstrip("/"):
+        candidates += _candidates_for_base(agent_url)
+
+    # Preserve order while removing duplicates (for example when the agent URL
+    # path is "/" the path-relative entries duplicate the origin-level ones,
+    # and when both bases are equivalent the second list collapses entirely).
     deduped: list[str] = []
     for candidate in candidates:
         if candidate not in deduped:
@@ -90,7 +133,7 @@ async def _check_single_agent(
         bool: True when healthy, False when unhealthy.
     """
 
-    probe_urls = build_agent_card_probe_urls(agent.url)
+    probe_urls = build_agent_card_probe_urls(agent.url, agent.agent_card_url)
     previous_last_healthy = agent.last_healthy_at
     is_healthy = False
     discovered_protocol_version: str | None = None

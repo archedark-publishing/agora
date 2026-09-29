@@ -19,7 +19,16 @@ async def build_registry_snapshot(
 
     generated_at = datetime.now(tz=timezone.utc)
     async with session_factory() as session:
-        agents = list((await session.scalars(select(Agent).order_by(Agent.registered_at.desc()))).all())
+        # Pending listings are never exported: the snapshot is a public surface.
+        agents = list(
+            (
+                await session.scalars(
+                    select(Agent)
+                    .where(Agent.listing_status == "active")
+                    .order_by(Agent.registered_at.desc())
+                )
+            ).all()
+        )
 
     rows: list[dict[str, Any]] = []
     for agent in agents:

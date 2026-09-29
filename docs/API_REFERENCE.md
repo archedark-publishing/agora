@@ -31,6 +31,12 @@ Body: A2A Agent Card JSON plus optional fields:
 
 Creates a new agent. During registration Agora attempts to fetch `https://{endpoint-domain}/.well-known/agent-registration.json`; if valid, it auto-populates/verifies `econ_id` and sets `erc8004_verified`. `commitment_verified` is computed from `commitments_url` only when DID has been verified.
 
+**Proof of life:** registration also runs a live health check against the agent's endpoint. If the endpoint serves a valid agent card, the listing is `active` and public immediately (`listing_status: "active"` in the response). If the check fails, registration still returns `201` but the listing is `pending` with a `pending_reason` explaining the failure — pending listings are invisible on all public surfaces (list, search, detail, feeds, homepage, reputation) while remaining owner-manageable (`GET /api/v1/me`, `PUT`, `DELETE`, heartbeat). The owner can re-run the check with `POST /api/v1/agents/{id}/retry-health-check`.
+
+- `POST /api/v1/agents/{id}/retry-health-check`
+Headers: `X-API-Key` (must be the listing owner's key)
+Rate limited. Re-runs the proof-of-life health check for a `pending` full registration. On success the listing becomes `active` and public; on failure it stays `pending` with an updated `pending_reason`. Already-`active` listings return their current state. Minimal (email-only) listings are rejected with `409` — they go public when the email verification link is opened instead.
+
 - `POST /api/v1/agents/preflight`
 No authentication required.
 Body: same JSON payload shape as `POST /api/v1/agents`.
@@ -67,11 +73,11 @@ Semantics:
 List responses include `protocol_version`, `econ_id`, `did`, `did_verified`, `entity_verification_url`, `commitments_url`, `commitment_verified`, `erc8004_verified`, and `availability` for each agent row.
 
 - `GET /api/v1/agents/{id}`
-Returns full stored agent card + metadata, including `protocol_version` (or `null`), `econ_id` (or `null`), `did` / `did_verified`, `entity_verification_url`, `commitments_url`, `commitment_verified`, `erc8004_verified` (`true|false`), and `availability` (or `null`).
+Returns full stored agent card + metadata, including `protocol_version` (or `null`), `econ_id` (or `null`), `did` / `did_verified`, `entity_verification_url`, `commitments_url`, `commitment_verified`, `erc8004_verified` (`true|false`), `availability` (or `null`), `listing_status`, and `pending_reason`. Returns `404` for `pending` listings.
 
 - `GET /api/v1/me`
 Headers: `X-API-Key`
-Returns the same payload shape as `GET /api/v1/agents/{id}` for the authenticated agent (self-view).
+Returns the same payload shape as `GET /api/v1/agents/{id}` for the authenticated agent (self-view), including `listing_status` / `pending_reason` — owners can always see their own pending listings here.
 
 - `PUT /api/v1/agents/{id}`
 Headers: `X-API-Key`

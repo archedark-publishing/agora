@@ -1086,7 +1086,11 @@ async def home_page(
 ) -> HTMLResponse:
     now_utc = datetime.now(tz=timezone.utc)
     liveness_rows = list(
-        await session.execute(select(Agent.health_status, Agent.url, Agent.availability))
+        await session.execute(
+            select(Agent.health_status, Agent.url, Agent.availability).where(
+                Agent.listing_status == "active"
+            )
+        )
     )
     total_agents = len(liveness_rows)
     healthy_agents = sum(
@@ -1102,7 +1106,10 @@ async def home_page(
     recent_agents = list(
         (
             await session.scalars(
-                select(Agent).order_by(Agent.registered_at.desc()).limit(8)
+                select(Agent)
+                .where(Agent.listing_status == "active")
+                .order_by(Agent.registered_at.desc())
+                .limit(8)
             )
         ).all()
     )
@@ -1981,15 +1988,18 @@ async def _prepare_preflight_schema_context(
         detail="Registration payload schema is valid",
     ), {
         "normalized_url": normalized_url,
+        "agent_card_url": agent_card_url,
         "did": did,
         "commitments_url": commitments_url,
         "agent_trust_url": agent_trust_url,
     }
 
 
-async def _run_preflight_health_check(normalized_url: str) -> dict[str, str | None]:
+async def _run_preflight_health_check(
+    normalized_url: str, agent_card_url: str | None = None
+) -> dict[str, str | None]:
     timeout = httpx.Timeout(PREFLIGHT_CHECK_TIMEOUT_SECONDS)
-    probe_urls = build_agent_card_probe_urls(normalized_url)
+    probe_urls = build_agent_card_probe_urls(normalized_url, agent_card_url)
     errors: list[str] = []
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -2962,7 +2972,10 @@ async def preflight_agent_registration(request: Request) -> dict[str, Any]:
         health_result, did_result, oatr_result = await asyncio.gather(
             _run_preflight_check_with_timeout(
                 "health",
-                _run_preflight_health_check(str(schema_context["normalized_url"])),
+                _run_preflight_health_check(
+                    str(schema_context["normalized_url"]),
+                    schema_context.get("agent_card_url"),
+                ),
             ),
             _run_preflight_check_with_timeout(
                 "did",
@@ -3022,7 +3035,7 @@ async def register_agent(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
     api_key: str = Header(alias="X-API-Key", min_length=1),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     await _enforce_registration_rate_limits(request, api_key)
 
     sanitized_payload = sanitize_json_strings(payload)
@@ -3146,6 +3159,21 @@ async def register_agent(
             detail="Agent with this URL already exists",
         )
 
+    # Proof of life: the endpoint must serve a valid agent card right now.
+    # Anyone may register, but nothing goes public on assertion alone.
+    preflight_health = await _run_preflight_check_with_timeout(
+        "health",
+        _run_preflight_health_check(normalized_url, agent_card_url),
+    )
+    proof_of_life_ok = preflight_health.get("status") == "pass"
+    now_utc = datetime.now(tz=timezone.utc)
+    if proof_of_life_ok:
+        listing_status = "active"
+        pending_reason = None
+    else:
+        listing_status = "pending"
+        pending_reason = preflight_health.get("detail") or "Health probe failed"
+
     econ_id, erc8004_verified = await _compute_erc8004_verification(normalized_url, econ_id)
 
     commitment_verified = await verify_commitments_document(
@@ -3197,6 +3225,13 @@ async def register_agent(
         availability=availability,
         task_latency=task_latency,
         owner_key_hash=hash_api_key(api_key),
+        listing_status=listing_status,
+        pending_reason=pending_reason,
+        # A passing preflight is a real observation: record it like the
+        # background health checker would.
+        health_status="healthy" if proof_of_life_ok else "unknown",
+        last_health_check=now_utc if proof_of_life_ok else None,
+        last_healthy_at=now_utc if proof_of_life_ok else None,
     )
     session.add(agent)
     try:
@@ -3215,12 +3250,24 @@ async def register_agent(
         ) from exc
 
     await session.refresh(agent)
+    if proof_of_life_ok:
+        message = "Agent registered successfully"
+    else:
+        message = (
+            "Agent registered, but the listing is pending: Agora could not fetch "
+            f"a valid agent card at {normalized_url} ({pending_reason}). "
+            "Fix your endpoint, then POST "
+            f"/api/v1/agents/{agent.id}/retry-health-check with your X-API-Key "
+            "header to publish the listing."
+        )
     return {
         "id": str(agent.id),
         "name": agent.name,
         "url": agent.url,
         "registered_at": agent.registered_at.isoformat(),
-        "message": "Agent registered successfully",
+        "listing_status": agent.listing_status,
+        "pending_reason": agent.pending_reason,
+        "message": message,
     }
 
 
@@ -3612,6 +3659,11 @@ async def register_agent_minimal(
         email_verified=False,
         directory_slug=slug,
         owner_key_hash=hash_api_key(api_key),
+        # Proof of life for email-only listings is the verification click:
+        # the listing stays out of the public directory until the inbox
+        # owner opens the signed link.
+        listing_status="pending",
+        pending_reason="Awaiting email verification",
     )
     session.add(agent)
     try:
@@ -3631,14 +3683,15 @@ async def register_agent_minimal(
     if email_sent:
         message = (
             f"Agent registered. A verification email was sent to {email} — "
-            "open the link inside to earn the verified badge."
+            "open the link inside to verify and publish your listing in the directory."
         )
     else:
         message = (
             "Agent registered. The verification email could not be sent "
             "(email delivery is not configured on this server). Once it is, "
             f"POST to /api/v1/agents/{agent.id}/verify-email/resend "
-            "with your X-API-Key header to receive the link."
+            "with your X-API-Key header to receive the link — your listing "
+            "goes public once the link is opened."
         )
     return {
         "id": str(agent.id),
@@ -3647,6 +3700,8 @@ async def register_agent_minimal(
         "registered_at": agent.registered_at.isoformat(),
         "email": email,
         "email_verified": False,
+        "listing_status": agent.listing_status,
+        "pending_reason": agent.pending_reason,
         "verification_email_sent": email_sent,
         "message": message,
     }
@@ -3694,7 +3749,8 @@ async def _owned_minimal_agent(
 
 def _minimal_owner_listing(agent: Agent) -> dict[str, Any]:
     return {**_minimal_listing(agent), "id": str(agent.id),
-            "email_verified": agent.email_verified, "pending_email": agent.pending_email}
+            "email_verified": agent.email_verified, "pending_email": agent.pending_email,
+            "listing_status": agent.listing_status, "pending_reason": agent.pending_reason}
 
 
 async def _send_pending_email(agent: Agent) -> bool:
@@ -3865,6 +3921,10 @@ async def verify_email_link(
         agent.email_generation = token_urlsafe(32)
         agent.agent_card = {**agent.agent_card, "email": agent.email}
         agent.email_verified = True
+        # The inbox owner clicked: proof of life for this listing. Publish it,
+        # even if the listing was still pending its initial verification.
+        agent.listing_status = "active"
+        agent.pending_reason = None
         try:
             await session.commit()
         except IntegrityError:
@@ -3872,6 +3932,11 @@ async def verify_email_link(
             return _page("Email unavailable", "This email is already registered. Request another address.", False, 409)
         return _page("Email verified", "Your listing now uses the verified new email address.", True, 200)
     if agent.email_verified:
+        if agent.listing_status != "active":
+            # Proof of life was already demonstrated; make it public.
+            agent.listing_status = "active"
+            agent.pending_reason = None
+            await session.commit()
         return _page(
             heading="Already verified",
             body_html=(
@@ -3882,13 +3947,16 @@ async def verify_email_link(
             status_code=200,
         )
     agent.email_verified = True
+    # The inbox owner clicked: proof of life for this listing. Publish it.
+    agent.listing_status = "active"
+    agent.pending_reason = None
     await session.commit()
     return _page(
         heading="Email verified",
         body_html=(
             f"The listing for <strong>{html.escape(agent.name)}</strong> "
-            f"(&lt;{html.escape(agent.email)}&gt;) is now verified. "
-            "Thanks for confirming you read mail here."
+            f"(&lt;{html.escape(agent.email)}&gt;) is now verified and live "
+            "in the directory. Thanks for confirming you read mail here."
         ),
         ok=True,
         status_code=200,
@@ -3918,6 +3986,11 @@ async def resend_verification_email(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     if agent.email_verified:
+        if agent.listing_status != "active":
+            # Self-heal: proof of life was already demonstrated; make it public.
+            agent.listing_status = "active"
+            agent.pending_reason = None
+            await session.commit()
         return {
             "id": str(agent.id),
             "email": agent.email,
@@ -3956,7 +4029,10 @@ async def agents_json_directory(
     contact it, and how quickly it says it will respond.
     """
     result = await session.execute(
-        select(Agent).order_by(Agent.registered_at.desc()).limit(500)
+        select(Agent)
+        .where(Agent.listing_status == "active")
+        .order_by(Agent.registered_at.desc())
+        .limit(500)
     )
     agents = list(result.scalars().all())
     return {
@@ -4452,9 +4528,18 @@ async def get_agent_detail(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     agent = await session.get(Agent, agent_id)
-    if agent is None:
+    if agent is None or agent.listing_status != "active":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    return await _agent_detail_dict(agent, session)
 
+
+async def _agent_detail_dict(agent: Agent, session: AsyncSession) -> dict[str, Any]:
+    """Full detail payload for one agent, regardless of listing status.
+
+    Public routes must 404 pending listings themselves (see get_agent_detail);
+    owner-authed callers use this directly so owners can inspect their own
+    pending listings.
+    """
     _track_agent_query(agent.id)
     is_stale, stale_days = compute_agent_stale_metadata(agent)
     return {
@@ -4488,6 +4573,8 @@ async def get_agent_detail(
         "location": agent.location,
         "email_verified": agent.email_verified,
         "directory_slug": agent.directory_slug,
+        "listing_status": agent.listing_status,
+        "pending_reason": agent.pending_reason,
     }
 
 
@@ -4503,7 +4590,7 @@ async def get_current_agent(
     if _upgrade_owner_key_hash_if_needed(agent, api_key):
         await session.commit()
 
-    return await get_agent_detail(agent_id=agent.id, session=session)
+    return await _agent_detail_dict(agent, session)
 
 
 @app.post("/api/v1/agents/{agent_id}/heartbeat", tags=["agents"])
@@ -4567,6 +4654,101 @@ async def heartbeat_agent(
     }
 
 
+@app.post("/api/v1/agents/{agent_id}/retry-health-check", tags=["agents"])
+async def retry_health_check(
+    agent_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Header(alias="X-API-Key", min_length=1),
+) -> dict[str, Any]:
+    """Re-run the proof-of-life health check for a pending URL listing.
+
+    Owner-key authed. On pass the listing becomes active (public); on fail
+    it stays pending with an updated reason. Already-active listings are
+    returned as-is. Minimal (email-only) listings activate via the email
+    verification link instead — this endpoint is for full A2A registrations.
+    """
+    await _enforce_rate_limit(
+        key=f"api:retry_health_check:key:{api_key_fingerprint(api_key)}",
+        limit=20,
+    )
+    await _enforce_rate_limit(
+        key=f"api:retry_health_check:ip:{_client_ip(request)}",
+        limit=60,
+    )
+
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    if not verify_api_key(api_key, agent.owner_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    _upgrade_owner_key_hash_if_needed(agent, api_key)
+
+    if agent.agent_card.get("directory_listing") is True:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This endpoint only supports full A2A registrations. "
+                "Minimal listings go public when the email verification link is opened."
+            ),
+        )
+    if agent.listing_status == "active":
+        await session.commit()
+        return {
+            "id": str(agent.id),
+            "listing_status": agent.listing_status,
+            "pending_reason": agent.pending_reason,
+            "health_status": agent.health_status,
+            "message": "Listing is already active",
+        }
+    if not agent.url:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Listing has no URL to probe",
+        )
+
+    health_result = await _run_preflight_check_with_timeout(
+        "health",
+        _run_preflight_health_check(agent.url, agent.agent_card_url),
+    )
+    now_utc = datetime.now(tz=timezone.utc)
+    if health_result.get("status") == "pass":
+        agent.listing_status = "active"
+        agent.pending_reason = None
+        agent.health_status = "healthy"
+        agent.last_health_check = now_utc
+        agent.last_healthy_at = now_utc
+        message = "Health check passed — listing is now public"
+    else:
+        agent.pending_reason = health_result.get("detail") or "Health probe failed"
+        agent.last_health_check = now_utc
+        message = (
+            "Health check failed — listing stays pending: "
+            f"{agent.pending_reason}. Fix your endpoint and retry."
+        )
+    await session.commit()
+    await session.refresh(agent)
+    return {
+        "id": str(agent.id),
+        "listing_status": agent.listing_status,
+        "pending_reason": agent.pending_reason,
+        "health_status": agent.health_status,
+        "message": message,
+    }
+
+
+def _require_public_subject(subject_agent: Agent | None) -> Agent:
+    """404 when the reputation subject is missing or not publicly listed.
+
+    Pending listings are invisible on every public surface, including
+    reputation endpoints; owner-authed incident response/dispute flows
+    deliberately do not use this helper.
+    """
+    if subject_agent is None or subject_agent.listing_status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    return subject_agent
+
+
 @app.post(
     "/api/v1/agents/{agent_id}/reliability-reports",
     status_code=status.HTTP_201_CREATED,
@@ -4579,8 +4761,7 @@ async def submit_reliability_report(
     api_key: str = Header(alias="X-API-Key", min_length=1),
 ) -> dict[str, Any]:
     subject_agent = await session.get(Agent, agent_id)
-    if subject_agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    _require_public_subject(subject_agent)
 
     reporter_agent = await _authenticate_agent_from_api_key(session, api_key)
     if reporter_agent is None:
@@ -4675,8 +4856,7 @@ async def get_agent_reliability(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     subject_agent = await session.get(Agent, agent_id)
-    if subject_agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    _require_public_subject(subject_agent)
 
     return await _compute_reliability_metrics(session, agent_id=agent_id)
 
@@ -4695,8 +4875,7 @@ async def submit_incident(
     _validate_incident_fields(payload)
 
     subject_agent = await session.get(Agent, agent_id)
-    if subject_agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    _require_public_subject(subject_agent)
 
     reporter_agent = await _authenticate_agent_from_api_key(session, api_key)
     if reporter_agent is None:
@@ -4746,8 +4925,7 @@ async def list_agent_incidents(
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     subject_agent = await session.get(Agent, agent_id)
-    if subject_agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    _require_public_subject(subject_agent)
 
     requester_agent_id: UUID | None = None
     if api_key:
@@ -4899,8 +5077,7 @@ async def get_agent_reputation(
     api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> dict[str, Any]:
     subject_agent = await session.get(Agent, agent_id)
-    if subject_agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    _require_public_subject(subject_agent)
 
     requester_agent_id: UUID | None = None
     if api_key:
@@ -5185,7 +5362,12 @@ async def list_agents(
     api_key = request.headers.get("X-API-Key")
     await _enforce_list_agents_rate_limits(request, api_key)
 
-    filters: list[Any] = []
+    filters: list[Any] = [
+        # Proof-of-life gating: pending listings are invisible on every
+        # public surface. They exist and are owner-manageable, but the
+        # directory only shows listings that proved they are real.
+        Agent.listing_status == "active",
+    ]
     if skill:
         filters.append(Agent.skills.overlap(skill))
     if capability:
