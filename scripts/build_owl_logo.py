@@ -378,7 +378,7 @@ class Builder:
         g_r = self.vgrad("g-cheek-r", 300, 573, [(0, "#9FD4EB"), (0.3, "#DBF2F7"), (1, "#F0FAFC")])
         strip = join(smooth([(152, 318), (150, 345), (151, 389), (160, 430), (181, 460), (206, 492), (237, 515),
                              (275, 534), (318, 552)]),
-                     [L((320, 520)), L((250, 470)), L((215, 400)), L((215, 330)), Z()])
+                     [L((320, 520)), L((250, 470)), L((215, 400)), L((232, 330)), Z()])
         g_strip = self.vgrad("g-strip", 318, 420, [(0, P["pale"]), (0.6, P["ice"]), (1, P["ice"])])
         ring = EYE_RING
         for s in self.sides:
@@ -386,10 +386,11 @@ class Builder:
             o.append(s.path(cheek, id="cheek", fill=(g_l, g_r)))
             if not fav:
                 o.append(s.path(strip, id="cheek-strip", fill=g_strip))
-                o.append(s.path(poly([(155, 275), (230, 302), (219, 317), (190, 315), (172, 296)]),
-                                id="cheek-facet", fill="#1364AA"))
-                o.append(s.path(poly([(186, 303), (216, 304), (213, 320), (199, 356), (196, 408), (188, 380),
-                                      (186, 330)]), id="cheek-inner", fill="#1364AA"))
+                # Royal facet + inner strip as one shape. Its right side runs under the ring
+                # (drawn next) so no lighter cheek colour can show between it and the outline.
+                o.append(s.path(poly([(155, 275), (230, 302), (246, 312), (236, 330), (226, 360), (218, 395),
+                                      (214, 416), (196, 408), (188, 380), (186, 330), (190, 315), (172, 296)]),
+                                id="cheek-royal", fill="#1364AA"))
             o.append(s.ellipse(ring["cx"], ring["cy"], ring["a"], ring["b"], ring["rot"], fill=P["ink"]))
             o.append(s.path(SCLERA, id="sclera", fill=P["ice"]))
             # Interior shading, clipped to the sclera.
@@ -397,8 +398,10 @@ class Builder:
             self.defs.append('<clipPath id="%s">%s</clipPath>' % (cid, s.path(SCLERA)))
             o.append('<g clip-path="url(#%s)">' % cid)
             if not fav:
-                top = poly([(225, 382), (236, 358), (256, 352), (292, 348), (322, 328), (342, 319), (345, 280),
-                            (200, 280)])
+                # Visible lower edge (sky over white) ends where it meets the pupil circle; the rest of
+                # the edge runs inside the pupil, which is drawn on top, so no white sliver shows above it.
+                top = poly([(225, 382), (236, 358), (256, 352), (280, 349), (297, 349), (304, 356), (322, 350),
+                            (352, 352), (400, 364), (415, 374), (440, 300), (345, 280), (200, 280)])
                 o.append(s.path(top, fill=P["skyl"]))
                 gr = self.vgrad("g-scl-right", 385, 510, [(0, P["skyl"]), (0.5, P["pale"]), (1, P["ice"])])
                 right = poly([(432, 383), (415, 425), (392, 470), (372, 505), (372, 545), (480, 545), (480, 383)])

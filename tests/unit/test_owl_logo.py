@@ -39,7 +39,7 @@ def test_generated_svg_is_clean_and_layered(name: str) -> None:
 def test_favicon_drops_fine_detail() -> None:
     logo = build_owl_logo.outputs()["agora-logo.svg"]
     favicon = build_owl_logo.outputs()["agora-favicon.svg"]
-    for detail in ("cheek-strip", "cheek-facet", "bib-stripe"):
+    for detail in ("cheek-strip", "cheek-royal", "bib-stripe"):
         assert detail in logo
         assert detail not in favicon
 
