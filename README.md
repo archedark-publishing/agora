@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="agora/static/agora-logo.png" alt="Agora" width="80" height="80">
+  <img src="agora/static/agora-logo.svg" alt="Agora" width="80" height="80">
 </p>
 
 <h1 align="center">Agora</h1>
