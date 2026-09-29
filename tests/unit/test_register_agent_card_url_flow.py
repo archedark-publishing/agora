@@ -59,7 +59,7 @@ async def client_with_fake_db(monkeypatch) -> httpx.AsyncClient:
     async def _no_erc8004_lookup(_url: str, econ_id: str | None) -> tuple[str | None, bool]:
         return econ_id, False
 
-    async def _passing_preflight(_url: str) -> dict[str, object]:
+    async def _passing_preflight(_url: str, _card_url: str | None = None) -> dict[str, object]:
         return {"status": "pass", "detail": None}
 
     monkeypatch.setattr(main_module, "_enforce_registration_rate_limits", _no_rate_limit)

@@ -1988,15 +1988,18 @@ async def _prepare_preflight_schema_context(
         detail="Registration payload schema is valid",
     ), {
         "normalized_url": normalized_url,
+        "agent_card_url": agent_card_url,
         "did": did,
         "commitments_url": commitments_url,
         "agent_trust_url": agent_trust_url,
     }
 
 
-async def _run_preflight_health_check(normalized_url: str) -> dict[str, str | None]:
+async def _run_preflight_health_check(
+    normalized_url: str, agent_card_url: str | None = None
+) -> dict[str, str | None]:
     timeout = httpx.Timeout(PREFLIGHT_CHECK_TIMEOUT_SECONDS)
-    probe_urls = build_agent_card_probe_urls(normalized_url)
+    probe_urls = build_agent_card_probe_urls(normalized_url, agent_card_url)
     errors: list[str] = []
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -2969,7 +2972,10 @@ async def preflight_agent_registration(request: Request) -> dict[str, Any]:
         health_result, did_result, oatr_result = await asyncio.gather(
             _run_preflight_check_with_timeout(
                 "health",
-                _run_preflight_health_check(str(schema_context["normalized_url"])),
+                _run_preflight_health_check(
+                    str(schema_context["normalized_url"]),
+                    schema_context.get("agent_card_url"),
+                ),
             ),
             _run_preflight_check_with_timeout(
                 "did",
@@ -3157,7 +3163,7 @@ async def register_agent(
     # Anyone may register, but nothing goes public on assertion alone.
     preflight_health = await _run_preflight_check_with_timeout(
         "health",
-        _run_preflight_health_check(normalized_url),
+        _run_preflight_health_check(normalized_url, agent_card_url),
     )
     proof_of_life_ok = preflight_health.get("status") == "pass"
     now_utc = datetime.now(tz=timezone.utc)
@@ -4703,7 +4709,7 @@ async def retry_health_check(
 
     health_result = await _run_preflight_check_with_timeout(
         "health",
-        _run_preflight_health_check(agent.url),
+        _run_preflight_health_check(agent.url, agent.agent_card_url),
     )
     now_utc = datetime.now(tz=timezone.utc)
     if health_result.get("status") == "pass":

@@ -42,7 +42,7 @@ async def clean_state(monkeypatch) -> None:
     monkeypatch.setattr(main_module, "discover_erc8004_registration_econ_id", _no_erc8004_discovery)
     monkeypatch.setattr("agora.health_checker.discover_erc8004_registration_econ_id", _no_erc8004_discovery)
 
-    async def _preflight_health_pass(_url: str) -> dict[str, str | None]:
+    async def _preflight_health_pass(_url: str, _card_url: str | None = None) -> dict[str, str | None]:
         # Proof-of-life gating probes the endpoint at registration; tests
         # must not depend on the real internet. Individual tests override
         # this stub to simulate pass/fail.

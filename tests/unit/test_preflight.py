@@ -33,7 +33,7 @@ def _payload(
 
 
 async def test_preflight_returns_pass_when_all_checks_pass(monkeypatch) -> None:
-    async def _health(_url: str) -> dict[str, str | None]:
+    async def _health(_url: str, _card_url: str | None = None) -> dict[str, str | None]:
         return {"status": "pass", "detail": "health ok"}
 
     async def _did(_did: str | None) -> dict[str, str | None]:
@@ -91,7 +91,7 @@ async def test_preflight_schema_failure_returns_overall_fail() -> None:
 
 
 async def test_preflight_health_failure_sets_overall_fail(monkeypatch) -> None:
-    async def _health(_url: str) -> dict[str, str | None]:
+    async def _health(_url: str, _card_url: str | None = None) -> dict[str, str | None]:
         return {"status": "fail", "detail": "unreachable"}
 
     monkeypatch.setattr(main_module, "_run_preflight_health_check", _health)
@@ -111,7 +111,7 @@ async def test_preflight_health_failure_sets_overall_fail(monkeypatch) -> None:
 
 
 async def test_preflight_skips_did_check_when_did_missing(monkeypatch) -> None:
-    async def _health(_url: str) -> dict[str, str | None]:
+    async def _health(_url: str, _card_url: str | None = None) -> dict[str, str | None]:
         return {"status": "pass", "detail": "health ok"}
 
     monkeypatch.setattr(main_module, "_run_preflight_health_check", _health)
@@ -130,7 +130,7 @@ async def test_preflight_skips_did_check_when_did_missing(monkeypatch) -> None:
 
 
 async def test_preflight_skips_commitments_when_url_missing(monkeypatch) -> None:
-    async def _health(_url: str) -> dict[str, str | None]:
+    async def _health(_url: str, _card_url: str | None = None) -> dict[str, str | None]:
         return {"status": "pass", "detail": "health ok"}
 
     async def _did(_did: str | None) -> dict[str, str | None]:

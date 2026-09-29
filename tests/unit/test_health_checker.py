@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 import httpx
 
-from agora.health_checker import _check_single_agent, build_agent_card_probe_urls
+from agora.health_checker import (
+    _check_single_agent,
+    build_agent_card_probe_url,
+    build_agent_card_probe_urls,
+)
 from agora.models import Agent
 
 
@@ -105,6 +109,43 @@ def test_build_agent_card_probe_urls_includes_path_relative_well_known() -> None
     urls = build_agent_card_probe_urls("https://example.com/agents/demo")
     assert urls[2] == "https://example.com/agents/demo/.well-known/agent-card.json"
     assert urls[3] == "https://example.com/agents/demo/.well-known/agent.json"
+
+
+def test_build_agent_card_probe_urls_divergent_card_url_comes_first() -> None:
+    """When the card was fetched from a different URL than the card's own
+    `url` field (e.g. card fetched at /agents/demo/.well-known/agent.json but
+    declaring "url": "https://example.com/rpc"), the proven fetch location
+    must be probed first -- otherwise registration validates the card and the
+    health check never looks where the card actually lives."""
+    urls = build_agent_card_probe_urls(
+        "https://example.com/rpc", "https://example.com/agents/demo"
+    )
+    assert urls == [
+        # Proven fetch location (agent_card_url) first.
+        "https://example.com/.well-known/agent-card.json",
+        "https://example.com/.well-known/agent.json",
+        "https://example.com/agents/demo/.well-known/agent-card.json",
+        "https://example.com/agents/demo/.well-known/agent.json",
+        "https://example.com/agents/demo",
+        "https://example.com/",
+        # Card's self-asserted endpoint second.
+        "https://example.com/rpc/.well-known/agent-card.json",
+        "https://example.com/rpc/.well-known/agent.json",
+        "https://example.com/rpc",
+    ]
+
+
+def test_build_agent_card_probe_urls_identical_urls_unchanged() -> None:
+    """Identical (or absent) card URL collapses to exactly the single-base
+    list -- no behavior change for the common case."""
+    single = build_agent_card_probe_urls("https://example.com/agents/demo")
+    assert build_agent_card_probe_urls(
+        "https://example.com/agents/demo", "https://example.com/agents/demo"
+    ) == single
+    assert build_agent_card_probe_urls("https://example.com/agents/demo", None) == single
+    assert build_agent_card_probe_url(
+        "https://example.com/rpc", "https://example.com/agents/demo"
+    ) == "https://example.com/.well-known/agent-card.json"
 
 
 async def test_check_single_agent_uses_fallback_when_well_known_fails(monkeypatch) -> None:
