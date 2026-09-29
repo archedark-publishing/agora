@@ -387,8 +387,10 @@ class Builder:
             if not fav:
                 o.append(s.path(strip, id="cheek-strip", fill=g_strip))
                 # Royal facet + inner strip as one shape. Its right side runs under the ring
-                # (drawn next) so no lighter cheek colour can show between it and the outline.
-                o.append(s.path(poly([(155, 275), (230, 302), (246, 312), (236, 330), (226, 360), (218, 395),
+                # (drawn next) so no lighter cheek colour can show between it and the outline, and
+                # its top edge sits ~2px above the cheek plate's so that plate can't peek out above it, and
+                # runs straight on until it disappears under the ring.
+                o.append(s.path(poly([(156, 271), (247, 306.7), (240, 330), (226, 360), (218, 395),
                                       (214, 416), (196, 408), (188, 380), (186, 330), (190, 315), (172, 296)]),
                                 id="cheek-royal", fill="#1364AA"))
             o.append(s.ellipse(ring["cx"], ring["cy"], ring["a"], ring["b"], ring["rot"], fill=P["ink"]))
