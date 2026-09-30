@@ -1180,6 +1180,8 @@ async def search_page(
     stale: str | None = Query(default=None),
     did_verified: bool | None = Query(default=None),
     agent_json_verified: bool | None = Query(default=None),
+    near: str | None = Query(default=None),
+    country: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> HTMLResponse:
@@ -1220,6 +1222,12 @@ async def search_page(
         # resolved by FastAPI, and the raw Query object would be bound as a
         # SQL parameter (asyncpg: "expected str, got Query").
         schedule_basis=None,
+        near=near,
+        country=country,
+        lat=None,
+        lon=None,
+        radius=25.0,
+        radius_unit="mi",
         limit=limit,
         offset=offset,
     )
@@ -1253,6 +1261,7 @@ async def search_page(
             "results": safe_results,
             "agents": safe_results["agents"],
             "query": q or "",
+            "near_query": near or "",
             "health_filter": health_filter_ui,
             "did_verified_filter": did_verified is True,
             "agent_json_verified_filter": agent_json_verified is True,
@@ -2263,8 +2272,135 @@ def _normalize_optional_string_field(
     return normalized
 
 
-def _normalize_optional_url_field(
+# ISO 3166-1 alpha-2 country codes. Static set so country validation needs
+# no new dependency; keep in sync with the standard if it ever changes.
+ISO_COUNTRY_CODES = frozenset({
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT",
+    "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI",
+    "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY",
+    "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN",
+    "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM",
+    "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK",
+    "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL",
+    "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM",
+    "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR",
+    "IS", "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN",
+    "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS",
+    "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK",
+    "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW",
+    "MX", "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP",
+    "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM",
+    "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW",
+    "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM",
+    "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF",
+    "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW",
+    "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
+    "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+})
+
+
+def _normalize_location_fields(
     *,
+    payload: dict[str, Any],
+    only_present: bool = False,
+) -> dict[str, Any]:
+    """Normalize and validate the structured location fields of a listing.
+
+    Reads city, region, country_code, latitude, longitude from ``payload``.
+    With ``only_present=False`` (registration) every field is read, missing
+    means None. With ``only_present=True`` (update) only keys present in the
+    payload are returned.
+
+    Raises 400 on: unknown country code, out-of-range or one-sided
+    coordinates, non-numeric coordinates, overlong city/region.
+
+    Callers derive the free-text ``location`` display string from the
+    returned structured fields when no explicit display string was given.
+    """
+    fields = ("city", "region", "country_code", "latitude", "longitude")
+    if only_present:
+        fields = tuple(f for f in fields if f in payload)
+    normalized: dict[str, Any] = {}
+
+    if "city" in fields:
+        normalized["city"] = _normalize_optional_string_field(
+            field_name="city", value=payload.get("city"), max_length=100
+        )
+    if "region" in fields:
+        normalized["region"] = _normalize_optional_string_field(
+            field_name="region", value=payload.get("region"), max_length=100
+        )
+    if "country_code" in fields:
+        raw_country = payload.get("country_code")
+        country = _normalize_optional_string_field(
+            field_name="country_code", value=raw_country, max_length=2
+        )
+        if country is not None:
+            country = country.upper()
+            if country not in ISO_COUNTRY_CODES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="country_code must be a valid ISO 3166-1 alpha-2 code",
+                )
+        normalized["country_code"] = country
+    if "latitude" in fields or "longitude" in fields:
+        lat = _normalize_optional_coordinate(
+            field_name="latitude", value=payload.get("latitude"), lo=-90.0, hi=90.0
+        )
+        lon = _normalize_optional_coordinate(
+            field_name="longitude", value=payload.get("longitude"), lo=-180.0, hi=180.0
+        )
+        if (lat is None) != (lon is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="latitude and longitude must be provided together",
+            )
+        normalized["latitude"] = lat
+        normalized["longitude"] = lon
+    return normalized
+
+
+def _normalize_optional_coordinate(
+    *,
+    field_name: str,
+    value: Any,
+    lo: float,
+    hi: float,
+) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must be a number",
+        )
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must be a number",
+        ) from None
+    if not (lo <= number <= hi):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must be between {lo} and {hi}",
+        )
+    return number
+
+
+def _derive_location_display(
+    *,
+    city: str | None,
+    region: str | None,
+    country_code: str | None,
+) -> str | None:
+    """Build a human-readable location string from structured fields."""
+    parts = [part for part in (city, region, country_code) if part]
+    return ", ".join(parts) or None
+
+
+def _normalize_optional_url_field(    *,
     field_name: str,
     value: Any,
     max_length: int,
@@ -3532,6 +3668,11 @@ def _minimal_listing(agent: Agent) -> dict[str, Any]:
         "email": agent.email,
         "response_sla": agent.response_sla,
         "location": agent.location,
+        "city": agent.city,
+        "region": agent.region,
+        "country_code": agent.country_code,
+        "latitude": agent.latitude,
+        "longitude": agent.longitude,
         "capabilities": list(agent.capabilities or []),
         "url": agent.url,
         "verified_email": agent.email_verified,
@@ -3585,6 +3726,15 @@ async def register_agent_minimal(
         value=sanitized_payload.get("location"),
         max_length=255,
     )
+    location_fields = _normalize_location_fields(payload=sanitized_payload)
+    # Derive the human-readable display string from structured fields when
+    # the caller provided structured data but no free-text location.
+    if location is None:
+        location = _derive_location_display(
+            city=location_fields["city"],
+            region=location_fields["region"],
+            country_code=location_fields["country_code"],
+        )
     capabilities = _normalize_capability_list(sanitized_payload.get("capabilities"))
 
     raw_url = _normalize_optional_string_field(
@@ -3642,6 +3792,9 @@ async def register_agent_minimal(
         minimal_card["response_sla"] = response_sla
     if location:
         minimal_card["location"] = location
+    for structured_field in ("city", "region", "country_code", "latitude", "longitude"):
+        if location_fields[structured_field] is not None:
+            minimal_card[structured_field] = location_fields[structured_field]
     if capabilities:
         minimal_card["capabilities"] = capabilities
     if normalized_url:
@@ -3656,6 +3809,11 @@ async def register_agent_minimal(
         email=email,
         response_sla=response_sla,
         location=location,
+        city=location_fields["city"],
+        region=location_fields["region"],
+        country_code=location_fields["country_code"],
+        latitude=location_fields["latitude"],
+        longitude=location_fields["longitude"],
         email_verified=False,
         directory_slug=slug,
         owner_key_hash=hash_api_key(api_key),
@@ -3786,7 +3944,8 @@ async def update_minimal_listing(
     await _enforce_minimal_owner_rate_limits(request, api_key, "patch")
     response.headers["Cache-Control"] = "no-store"
     agent = await _owned_minimal_agent(session, agent_id, api_key, for_update=True)
-    allowed = {"name", "description", "response_sla", "location", "capabilities", "email"}
+    allowed = {"name", "description", "response_sla", "location", "capabilities", "email",
+               "city", "region", "country_code", "latitude", "longitude"}
     unknown = set(payload) - allowed
     if unknown:
         raise HTTPException(status_code=400, detail="Unknown or immutable fields: " + ", ".join(sorted(unknown)))
@@ -3800,6 +3959,26 @@ async def update_minimal_listing(
             field_name=field, value=sanitize_json_strings(payload[field]), max_length=limit)
         if field == "name" and not normalized[field]:
             raise HTTPException(status_code=400, detail="name is required")
+    structured_present = [f for f in ("city", "region", "country_code", "latitude", "longitude") if f in payload]
+    if structured_present:
+        sanitized_location_payload = {
+            f: sanitize_json_strings(payload[f]) for f in structured_present
+        }
+        normalized.update(
+            _normalize_location_fields(payload=sanitized_location_payload, only_present=True)
+        )
+        # Keep the display string in sync when the caller changes structured
+        # fields without providing an explicit free-text location.
+        if "location" not in payload:
+            effective = {
+                f: normalized[f] if f in normalized else getattr(agent, f)
+                for f in ("city", "region", "country_code")
+            }
+            normalized["location"] = _derive_location_display(
+                city=effective["city"],
+                region=effective["region"],
+                country_code=effective["country_code"],
+            )
     if "capabilities" in payload:
         value = payload["capabilities"]
         if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
@@ -4495,6 +4674,12 @@ async def search_agents(
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    near: str | None = Query(default=None),
+    country: str | None = Query(default=None),
+    lat: float | None = Query(default=None),
+    lon: float | None = Query(default=None),
+    radius: float = Query(default=25.0),
+    radius_unit: Literal["mi", "km"] = Query(default="mi"),
 ) -> dict[str, Any]:
     """Legacy alias for list endpoint to avoid UUID route collisions on /agents/{agent_id}."""
 
@@ -4517,6 +4702,12 @@ async def search_agents(
         protocol_version=protocol_version,
         oatr_issuer_id=oatr_issuer_id,
         schedule_basis=schedule_basis,
+        near=near,
+        country=country,
+        lat=lat,
+        lon=lon,
+        radius=radius,
+        radius_unit=radius_unit,
         limit=limit,
         offset=offset,
     )
@@ -4571,6 +4762,11 @@ async def _agent_detail_dict(agent: Agent, session: AsyncSession) -> dict[str, A
         "email": agent.email,
         "response_sla": agent.response_sla,
         "location": agent.location,
+        "city": agent.city,
+        "region": agent.region,
+        "country_code": agent.country_code,
+        "latitude": agent.latitude,
+        "longitude": agent.longitude,
         "email_verified": agent.email_verified,
         "directory_slug": agent.directory_slug,
         "listing_status": agent.listing_status,
@@ -5308,6 +5504,19 @@ async def patch_agent(
     )
 
 
+def _haversine_distance(
+    lat1: float, lon1: float, lat2: float, lon2: float, *, unit: str = "mi"
+) -> float:
+    """Great-circle distance between two points. Mirrors the SQL filter math."""
+    from math import asin, cos, radians, sin, sqrt
+
+    earth_radius = 3959.0 if unit == "mi" else 6371.0
+    d_lat = radians(lat2 - lat1)
+    d_lon = radians(lon2 - lon1)
+    a = sin(d_lat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
+    return 2 * earth_radius * asin(sqrt(a))
+
+
 @app.get("/api/v1/agents", tags=["agents"])
 async def list_agents(
     request: Request,
@@ -5355,6 +5564,39 @@ async def list_agents(
     schedule_basis: Literal["polling", "webhook", "streaming", "persistent"] | None = Query(
         default=None,
         description="Filter by taskLatency.scheduleBasis.",
+    ),
+    near: str | None = Query(
+        default=None,
+        description=(
+            "Free-text location match against city, region, country code, "
+            "and the display location string. Listings without any location "
+            "set are excluded when this filter is present."
+        ),
+    ),
+    country: str | None = Query(
+        default=None,
+        description="Filter by ISO 3166-1 alpha-2 country code (e.g. US).",
+    ),
+    lat: float | None = Query(
+        default=None,
+        ge=-90,
+        le=90,
+        description="Radius search anchor latitude. Must be paired with lon.",
+    ),
+    lon: float | None = Query(
+        default=None,
+        ge=-180,
+        le=180,
+        description="Radius search anchor longitude. Must be paired with lat.",
+    ),
+    radius: float = Query(
+        default=25.0,
+        gt=0,
+        description="Search radius. Only applies with lat/lon.",
+    ),
+    radius_unit: Literal["mi", "km"] = Query(
+        default="mi",
+        description="Unit for radius and returned distances.",
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -5467,6 +5709,57 @@ async def list_agents(
     if schedule_basis is not None:
         filters.append(Agent.task_latency["scheduleBasis"].astext == schedule_basis)
 
+    if near is not None:
+        near_text = near.strip()
+        if not near_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="near cannot be empty",
+            )
+        near_like = f"%{near_text}%"
+        filters.append(
+            or_(
+                Agent.city.ilike(near_like),
+                Agent.region.ilike(near_like),
+                Agent.country_code.ilike(near_like),
+                Agent.location.ilike(near_like),
+            )
+        )
+
+    if country is not None:
+        country_code = country.strip().upper()
+        if country_code not in ISO_COUNTRY_CODES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="country must be a valid ISO 3166-1 alpha-2 code",
+            )
+        filters.append(Agent.country_code == country_code)
+
+    # Radius search: DB filters by haversine distance; the per-result
+    # distance is computed in Python for the response payload.
+    geo_search = lat is not None or lon is not None
+    distance_order_expr = None
+    if geo_search:
+        if lat is None or lon is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="lat and lon must be provided together",
+            )
+        earth_radius = 3959.0 if radius_unit == "mi" else 6371.0
+        acos_arg = (
+            func.cos(func.radians(lat))
+            * func.cos(func.radians(Agent.latitude))
+            * func.cos(func.radians(Agent.longitude) - func.radians(lon))
+            + func.sin(func.radians(lat)) * func.sin(func.radians(Agent.latitude))
+        )
+        # Clamp the acos argument against float rounding.
+        distance_order_expr = earth_radius * func.acos(
+            func.least(1.0, func.greatest(-1.0, acos_arg))
+        )
+        filters.append(Agent.latitude.is_not(None))
+        filters.append(Agent.longitude.is_not(None))
+        filters.append(distance_order_expr <= radius)
+
     now_utc = datetime.now(tz=timezone.utc)
     stale_expr = stale_filter_expression(now_utc)
     if effective_stale is True:
@@ -5481,18 +5774,18 @@ async def list_agents(
     total_query = select(func.count()).select_from(base_query.subquery())
     total = int((await session.scalar(total_query)) or 0)
 
+    health_order = case(
+        (Agent.health_status == "healthy", 0),
+        (Agent.health_status == "unknown", 1),
+        (Agent.health_status == "unhealthy", 2),
+        else_=3,
+    )
+    if distance_order_expr is not None:
+        order_criteria: list[Any] = [distance_order_expr, Agent.registered_at.desc()]
+    else:
+        order_criteria = [health_order, Agent.registered_at.desc()]
     ordered_query = (
-        base_query.order_by(
-            case(
-                (Agent.health_status == "healthy", 0),
-                (Agent.health_status == "unknown", 1),
-                (Agent.health_status == "unhealthy", 2),
-                else_=3,
-            ),
-            Agent.registered_at.desc(),
-        )
-        .limit(limit)
-        .offset(offset)
+        base_query.order_by(*order_criteria).limit(limit).offset(offset)
     )
     agents = list((await session.scalars(ordered_query)).all())
     for agent in agents:
@@ -5507,40 +5800,53 @@ async def list_agents(
     for agent in agents:
         is_stale, stale_days = compute_agent_stale_metadata(agent, now=now_utc)
         summary = reputation_summaries.get(agent.id, {})
-        response_agents.append(
-            {
-                "id": str(agent.id),
-                "name": agent.name,
-                "description": agent.description,
-                "url": agent.url,
-                "version": agent.version,
-                "skills": agent.skills or [],
-                "capabilities": agent.capabilities or [],
-                "health_status": agent.health_status,
-                "registered_at": agent.registered_at.isoformat(),
-                "is_stale": is_stale,
-                "stale_days": stale_days,
-                "reliability_response_rate": summary.get("reliability_response_rate"),
-                "public_incident_count": summary.get("public_incident_count", 0),
-                "agent_card_url": agent.agent_card_url,
-                "protocol_version": agent.protocol_version,
-                "econ_id": agent.econ_id,
-                "did": agent.did,
-                "oatr_issuer_id": agent.oatr_issuer_id,
-                "did_verified": agent.did_verified,
-                "agent_json_verified": agent.agent_json_verified,
-                "entity_verification_url": agent.entity_verification_url,
-                "commitments_url": agent.commitments_url,
-                "commitments_count": agent.commitments_count,
-                "commitments_summary": agent.commitments_summary,
-                "commitment_verified": agent.commitment_verified,
-                "erc8004_verified": agent.erc8004_verified,
-                "operator": agent.operator,
-                "operator_verified": _operator_claim_is_verified(agent.operator),
-                "availability": agent.availability,
-                "taskLatency": agent.task_latency,
-            }
-        )
+        entry: dict[str, Any] = {
+            "id": str(agent.id),
+            "name": agent.name,
+            "description": agent.description,
+            "url": agent.url,
+            "version": agent.version,
+            "skills": agent.skills or [],
+            "capabilities": agent.capabilities or [],
+            "health_status": agent.health_status,
+            "registered_at": agent.registered_at.isoformat(),
+            "is_stale": is_stale,
+            "stale_days": stale_days,
+            "location": agent.location,
+            "city": agent.city,
+            "region": agent.region,
+            "country_code": agent.country_code,
+            "latitude": agent.latitude,
+            "longitude": agent.longitude,
+            "reliability_response_rate": summary.get("reliability_response_rate"),
+            "public_incident_count": summary.get("public_incident_count", 0),
+            "agent_card_url": agent.agent_card_url,
+            "protocol_version": agent.protocol_version,
+            "econ_id": agent.econ_id,
+            "did": agent.did,
+            "oatr_issuer_id": agent.oatr_issuer_id,
+            "did_verified": agent.did_verified,
+            "agent_json_verified": agent.agent_json_verified,
+            "entity_verification_url": agent.entity_verification_url,
+            "commitments_url": agent.commitments_url,
+            "commitments_count": agent.commitments_count,
+            "commitments_summary": agent.commitments_summary,
+            "commitment_verified": agent.commitment_verified,
+            "erc8004_verified": agent.erc8004_verified,
+            "operator": agent.operator,
+            "operator_verified": _operator_claim_is_verified(agent.operator),
+            "availability": agent.availability,
+            "taskLatency": agent.task_latency,
+        }
+        if geo_search and agent.latitude is not None and agent.longitude is not None:
+            entry["distance"] = round(
+                _haversine_distance(
+                    lat, lon, agent.latitude, agent.longitude, unit=radius_unit
+                ),
+                2,
+            )
+            entry["distance_unit"] = radius_unit
+        response_agents.append(entry)
 
     return {
         "agents": response_agents,

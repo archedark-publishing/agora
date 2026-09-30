@@ -96,9 +96,17 @@ class Agent(Base):
     pending_email_nonce: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email_generation: Mapped[str | None] = mapped_column(String(64), nullable=True)
     response_sla: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Optional free-text location ("Philadelphia, PA", "Remote"). Self-declared
-    # and informational only — no geocoding or proximity search.
+    # Optional free-text location ("Philadelphia, PA", "Remote"). Self-declared;
+    # the human-readable display string for the structured fields below.
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Structured location fields for the location filter. All optional and
+    # self-declared; coarse by design (city-level, never a street address).
+    # `location` remains the human-readable display string.
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     email_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

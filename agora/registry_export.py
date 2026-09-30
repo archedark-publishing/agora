@@ -56,6 +56,12 @@ async def build_registry_snapshot(
                 "operator": agent.operator,
                 "operator_verified": bool(agent.operator and agent.operator.get("verified") is True),
                 "availability": agent.availability,
+                "location": agent.location,
+                "city": agent.city,
+                "region": agent.region,
+                "country_code": agent.country_code,
+                "latitude": agent.latitude,
+                "longitude": agent.longitude,
             }
         )
 
