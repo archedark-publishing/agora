@@ -323,3 +323,59 @@ async def test_agent_detail_includes_location_fields(
     assert payload["city"] == "Lansdale"
     assert payload["country_code"] == "US"
     assert payload["latitude"] == pytest.approx(40.2417)
+
+
+async def test_search_page_blank_near_and_country_render_page(
+    client, capture_verification_email
+) -> None:
+    """The HTML search form always submits its named inputs, so a blank
+    Near field arrives as `near=` (likewise `country=`). That must behave
+    like "no filter" on the /search page, not replace the page with a 400."""
+    await _register(client, "Lansdale Plumber", "bn1@example.com", "bk1", **LANSDALE)
+    await _verify(client, capture_verification_email, email_index=0)
+
+    response = await client.get("/search", params={"q": "plumber", "near": "", "country": ""})
+    assert response.status_code == 200, response.text
+    assert "text/html" in response.headers["content-type"]
+    assert "Lansdale Plumber" in response.text
+
+
+async def test_update_coordinate_only_patch_preserves_display_location(
+    client, capture_verification_email
+) -> None:
+    """A coordinate-only PATCH must not re-derive the display string: a
+    listing with a free-text location and no structured fields would
+    otherwise have its display text wiped to null."""
+    body = await _register(
+        client, "Free-Text Agent", "ft@example.com", "ftk1",
+        location="Greater Philadelphia area",
+    )
+    agent_id = body["id"]
+    view = await _owner_view(client, agent_id, "ftk1")
+    assert view["location"] == "Greater Philadelphia area"
+
+    patch = await client.patch(
+        f"/api/v1/agents/{agent_id}/minimal",
+        json={"latitude": 40.2417, "longitude": -75.2837},
+        headers={"X-API-Key": "ftk1"},
+    )
+    assert patch.status_code == 200, patch.text
+    view = await _owner_view(client, agent_id, "ftk1")
+    assert view["latitude"] == pytest.approx(40.2417)
+    assert view["longitude"] == pytest.approx(-75.2837)
+    assert view["location"] == "Greater Philadelphia area"
+
+
+async def test_search_alias_geo_validation_matches_list_route(client) -> None:
+    """The /api/v1/agents/search alias must enforce the same geo bounds as
+    /api/v1/agents: out-of-range, infinite, or negative-radius values are
+    422s on both routes, not 200s/500s."""
+    for path in ("/api/v1/agents/search", "/api/v1/agents"):
+        bad_lat = await client.get(path, params={"lat": "400", "lon": "-75"})
+        assert bad_lat.status_code == 422, (path, bad_lat.text)
+        inf_lat = await client.get(path, params={"lat": "inf", "lon": "-75"})
+        assert inf_lat.status_code == 422, (path, inf_lat.text)
+        bad_radius = await client.get(
+            path, params={"lat": "40", "lon": "-75", "radius": "-5"}
+        )
+        assert bad_radius.status_code == 422, (path, bad_radius.text)

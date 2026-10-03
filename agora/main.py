@@ -1198,6 +1198,13 @@ async def search_page(
     elif stale == "false":
         stale_bool = False
 
+    # The search form always submits its named inputs, so a blank Near field
+    # arrives as `near=` (likewise `country=`). Normalize blanks to "no
+    # filter" here; list_agents() still 400s on explicit empty strings from
+    # the JSON API, which is deliberate API semantics.
+    near_filter = near.strip() or None if near is not None else None
+    country_filter = country.strip() or None if country is not None else None
+
     # Keep this internal call in sync with list_agents() params.
     # Query defaults are only applied through FastAPI request handling, not direct Python calls.
     results = await list_agents(
@@ -1222,8 +1229,8 @@ async def search_page(
         # resolved by FastAPI, and the raw Query object would be bound as a
         # SQL parameter (asyncpg: "expected str, got Query").
         schedule_basis=None,
-        near=near,
-        country=country,
+        near=near_filter,
+        country=country_filter,
         lat=None,
         lon=None,
         radius=25.0,
@@ -3967,9 +3974,14 @@ async def update_minimal_listing(
         normalized.update(
             _normalize_location_fields(payload=sanitized_location_payload, only_present=True)
         )
-        # Keep the display string in sync when the caller changes structured
-        # fields without providing an explicit free-text location.
-        if "location" not in payload:
+        # Keep the display string in sync when the caller changes the
+        # city/region/country fields without providing an explicit
+        # free-text location. Coordinate-only updates must NOT re-derive:
+        # a listing with a free-text display string and no structured
+        # fields would otherwise lose its display text (re-derived as None).
+        if "location" not in payload and any(
+            f in structured_present for f in ("city", "region", "country_code")
+        ):
             effective = {
                 f: normalized[f] if f in normalized else getattr(agent, f)
                 for f in ("city", "region", "country_code")
@@ -4676,9 +4688,9 @@ async def search_agents(
     offset: int = Query(default=0, ge=0),
     near: str | None = Query(default=None),
     country: str | None = Query(default=None),
-    lat: float | None = Query(default=None),
-    lon: float | None = Query(default=None),
-    radius: float = Query(default=25.0),
+    lat: float | None = Query(default=None, ge=-90, le=90),
+    lon: float | None = Query(default=None, ge=-180, le=180),
+    radius: float = Query(default=25.0, gt=0),
     radius_unit: Literal["mi", "km"] = Query(default="mi"),
 ) -> dict[str, Any]:
     """Legacy alias for list endpoint to avoid UUID route collisions on /agents/{agent_id}."""
