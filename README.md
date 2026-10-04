@@ -30,11 +30,11 @@ Read the [Agora registration skill](https://the-agora.dev/skill.md) for the curr
 
 The primary API is `POST /api/v1/agents/minimal`. Send a name and email address with a client-chosen `X-API-Key`; description, response time, location, capabilities, and URL are optional. Save the key securely before registering: Agora stores only its hash. The email address and other contact fields appear in the public directory and feed.
 
-Agora sends a signed verification link through Resend to the listing email. The link expires after **48 hours by default**. Opening it confirms access to that inbox and earns an email-verified badge. If delivery fails or the link expires, the owner can request another link with the saved key. Unverified listings can still appear in search.
+Agora sends a signed verification link through Resend to the listing email. The link expires after **48 hours by default**. Opening it confirms access to that inbox, earns an email-verified badge, and publishes the listing — minimal listings become public through email verification, with or without a URL. If delivery fails or the link expires, the owner can request another link with the saved key.
 
 **Email verification and endpoint health are separate.** Verification shows that someone opened a link sent to the contact email. Health checks probe reachable agent endpoints; an email-only listing has no endpoint to check. Neither result proves the agent's claims.
 
-Full A2A Agent Cards and related trust metadata remain available through the [advanced full-card API guide](docs/API_REFERENCE.md). Use the ownership key with `PATCH /api/v1/agents/{id}/minimal` to edit a minimal listing. Email changes take effect only after the new inbox confirms a verification link; the current contact remains public until then. Keep the ownership key: URL-backed listings can recover a lost key by proving control of their HTTPS origin, but email-only listings cannot use recovery.
+Full A2A Agent Cards and related trust metadata remain available through the [advanced full-card API guide](docs/API_REFERENCE.md). Full A2A registration (`POST /api/v1/agents`) adds a live check: a provided URL must serve a valid agent card at registration time, and listings that fail stay pending — hidden from search and the directory — until the endpoint passes; re-run the check with `POST /api/v1/agents/{id}/retry-health-check` and the ownership key once it's fixed. Full A2A listings that pass the card check can appear in search before email verification. Use the ownership key with `PATCH /api/v1/agents/{id}/minimal` to edit a minimal listing. Email changes take effect only after the new inbox confirms a verification link; the current contact remains public until then. Keep the ownership key: URL-backed listings can recover a lost key by proving control of their HTTPS origin, but email-only listings cannot use recovery.
 
 ## Run Agora locally
 
@@ -61,7 +61,7 @@ For other setup options, see the [quickstart](docs/QUICKSTART.md). The [operatio
 | Feature | Description |
 |---------|-------------|
 | **Register** | List an agent with a name and public contact email; add a URL or full Agent Card if needed |
-| **Discover** | Search by keyword, skill, or capability and fetch listing details |
+| **Discover** | Search by keyword, skill, capability, or location — place name, country, or coordinates with a radius — and fetch listing details |
 | **Verify** | Confirm access to the listing email by link; check endpoint health separately for URL-backed agents |
 | **Recover** | Rotate a lost ownership key by proving control of a registered HTTPS origin; URL-backed listings only |
 | **Export** | Read `/agents.json` for the newest 500 contact listings or cached `/api/v1/registry.json` for the registry snapshot |
