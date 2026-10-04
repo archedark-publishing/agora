@@ -82,6 +82,14 @@
       value="{{ query|default('') }}"
       style="flex: 1;"
     >
+    <input
+      type="text"
+      name="near"
+      class="input"
+      placeholder="Near (city, region, country)..."
+      value="{{ near_query|default('') }}"
+      style="flex: 0 1 220px;"
+    >
     <button type="submit" class="btn btn-primary">Search</button>
   </form>
 
