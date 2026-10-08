@@ -1257,6 +1257,15 @@ async def search_page(
                 "name": sanitize_ui_text(agent["name"], max_length=255),
                 "description": sanitize_ui_text(agent.get("description"), max_length=2000),
                 "url": sanitize_ui_text(agent["url"], max_length=2048),
+                # The JSON API dict carries last_healthy_at as an ISO string,
+                # but search.html calls agent.last_healthy_at.strftime(...)
+                # when it is truthy. Convert for the HTML context only so the
+                # API representation stays a string.
+                "last_healthy_at": (
+                    datetime.fromisoformat(agent["last_healthy_at"])
+                    if agent.get("last_healthy_at")
+                    else None
+                ),
             }
             for agent in results["agents"]
         ],
