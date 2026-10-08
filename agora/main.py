@@ -1087,7 +1087,12 @@ async def home_page(
     now_utc = datetime.now(tz=timezone.utc)
     liveness_rows = list(
         await session.execute(
-            select(Agent.health_status, Agent.url, Agent.availability).where(
+            select(
+                Agent.health_status,
+                Agent.last_healthy_at,
+                Agent.email_verified,
+                Agent.availability,
+            ).where(
                 Agent.listing_status == "active"
             )
         )
@@ -1095,10 +1100,11 @@ async def home_page(
     total_agents = len(liveness_rows)
     healthy_agents = sum(
         1
-        for health_status, url, availability in liveness_rows
+        for health_status, last_healthy_at, email_verified, availability in liveness_rows
         if agent_counts_as_live(
             health_status=health_status,
-            url=url,
+            has_verified_endpoint=last_healthy_at is not None,
+            email_verified=email_verified,
             availability=availability,
             now=now_utc,
         )
