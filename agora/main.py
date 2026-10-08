@@ -1130,6 +1130,8 @@ async def home_page(
                 "description": sanitize_ui_text(agent.description, max_length=2000),
                 "url": sanitize_ui_text(agent.url, max_length=2048),
                 "health_status": agent.health_status,
+                "agent_card_url": agent.agent_card_url,
+                "last_healthy_at": agent.last_healthy_at,
                 "is_stale": is_stale,
                 "stale_days": stale_days,
                 "registered_at": agent.registered_at.isoformat(),
@@ -5821,6 +5823,10 @@ async def list_agents(
             "skills": agent.skills or [],
             "capabilities": agent.capabilities or [],
             "health_status": agent.health_status,
+            "last_healthy_at": (
+                agent.last_healthy_at.isoformat() if agent.last_healthy_at else None
+            ),
+            "email_verified": agent.email_verified,
             "registered_at": agent.registered_at.isoformat(),
             "is_stale": is_stale,
             "stale_days": stale_days,
