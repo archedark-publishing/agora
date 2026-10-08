@@ -122,7 +122,7 @@
           {% endif %}
         </div>
         <div class="agent-badges">
-          {{ health_badge(agent.health_status, agent.url) }}
+          {{ health_badge(agent.health_status, agent.agent_card_url, agent.last_healthy_at) }}
           {{ email_verified_badge(agent.email_verified) }}
           {{ verified_badge(agent.is_verified) }}
           {{ tenure_badge(agent.tenure_days) }}
