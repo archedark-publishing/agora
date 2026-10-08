@@ -351,7 +351,9 @@ async def test_health_rate_counts_live_email_only_listings(
     )
     assert heartbeat.status_code == 200, heartbeat.text
 
-    # Registered but never heartbeated: email-only, but not known live.
+    # Registered and email-verified but never heartbeated: email
+    # verification is the strongest available check for a listing with no
+    # verified endpoint, so it counts as live.
     quiet = await _register_minimal(
         client,
         payload=_minimal_payload(
@@ -362,9 +364,20 @@ async def test_health_rate_counts_live_email_only_listings(
     await _verify_minimal(client, live, capture_verification_email, email_index=0)
     await _verify_minimal(client, quiet, capture_verification_email, email_index=1)
 
+    # Informational URL, never passed proof-of-life, email verified (the
+    # Tale shape): URL presence alone must not mark it unhealthy.
+    url_payload = _minimal_payload(
+        name="URL Email Agent", email="url-email@example.com"
+    )
+    url_payload["url"] = "https://example.com/url-email-agent"
+    url_agent = await _register_minimal(
+        client, payload=url_payload, api_key="url-email-key"
+    )
+    await _verify_minimal(client, url_agent, capture_verification_email, email_index=2)
+
     response = await client.get("/")
     assert response.status_code == 200
-    assert '<div class="stat-value">50%</div>' in response.text
+    assert '<div class="stat-value">100%</div>' in response.text
 
 
 async def test_health_rate_still_counts_checked_agents(
