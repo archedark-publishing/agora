@@ -160,10 +160,20 @@ async def _check_single_agent(
         agent.last_health_check = now_utc
         agent.last_healthy_at = now_utc
         agent.protocol_version = discovered_protocol_version
-    else:
+    elif previous_last_healthy is not None:
+        # Regression: this endpoint was verified healthy before and has now
+        # gone down.
         agent.health_status = "unhealthy"
         agent.last_health_check = now_utc
         agent.last_healthy_at = previous_last_healthy
+        agent.protocol_version = None
+    else:
+        # Never passed proof-of-life (e.g. a minimal email-verified listing
+        # with an informational URL): there is no verified state to regress
+        # from, so it stays "unknown" rather than "unhealthy".
+        agent.health_status = "unknown"
+        agent.last_health_check = now_utc
+        agent.last_healthy_at = None
         agent.protocol_version = None
 
     discovered_econ_id = await discover_erc8004_registration_econ_id(

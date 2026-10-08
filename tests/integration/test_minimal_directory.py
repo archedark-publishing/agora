@@ -284,7 +284,7 @@ async def test_home_page_renders_minimal_listings(
     assert "within 4 hours" in response.text
 
 
-async def test_email_only_listing_shows_email_only_badge(
+async def test_email_verified_listing_shows_no_health_badge(
     client, capture_verification_email
 ) -> None:
     email_only = await _register_minimal(
@@ -308,16 +308,26 @@ async def test_email_only_listing_shows_email_only_badge(
     assert response.status_code == 200
     assert "Email Only Badge Agent" in response.text
     assert "URL Badge Agent" in response.text
-    # Email-only listings have no endpoint to probe, so the badge explains
-    # that instead of the misleading "Unknown".
-    assert '<span class="badge badge-email"' in response.text
-    assert "Email only" in response.text
-    # A listing WITH a URL whose health was never checked still shows Unknown.
-    assert '<span class="badge badge-unknown">Unknown</span>' in response.text
+    # Listings that never passed proof-of-life render no health badge at
+    # all: email verification is the strongest check available for them, so
+    # the "Email verified" badge carries the trust signal instead of a
+    # misleading "Unknown" or "Unhealthy".
+    assert '<span class="badge badge-email"' not in response.text
+    assert "Email only" not in response.text
+    assert '<span class="badge badge-unknown">' not in response.text
+    assert '<span class="badge badge-unhealthy">' not in response.text
+    assert "Email verified" in response.text
 
     detail = await client.get(f"/agent/{email_only['id']}")
     assert detail.status_code == 200
-    assert "Email only" in detail.text
+    assert "Email only" not in detail.text
+    assert "Email verified" in detail.text
+
+    url_detail = await client.get(f"/agent/{url_agent['id']}")
+    assert url_detail.status_code == 200
+    assert '<span class="badge badge-unknown">' not in url_detail.text
+    assert '<span class="badge badge-unhealthy">' not in url_detail.text
+    assert "Email verified" in url_detail.text
 
 
 async def test_health_rate_counts_live_email_only_listings(

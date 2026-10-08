@@ -256,6 +256,34 @@ async def test_check_single_agent_marks_unhealthy_when_all_probes_fail(monkeypat
     assert agent.erc8004_verified is False
 
 
+async def test_check_single_agent_keeps_unknown_when_never_verified(monkeypatch) -> None:
+    """A listing that never passed proof-of-life (e.g. a minimal
+    email-verified listing with an informational URL) must stay "unknown"
+    when probes fail — "unhealthy" means regression from a verified state."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request)
+
+    _patch_outbound_safety(monkeypatch)
+
+    agent = _agent("https://example.com/")
+    assert agent.last_healthy_at is None
+    now_utc = datetime.now(tz=timezone.utc)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        healthy = await _check_single_agent(
+            agent,
+            client,
+            now_utc,
+            allow_private_network_targets=False,
+        )
+
+    assert healthy is False
+    assert agent.health_status == "unknown"
+    assert agent.last_health_check == now_utc
+    assert agent.last_healthy_at is None
+    assert agent.protocol_version is None
+
+
 async def test_check_single_agent_verifies_or_populates_econ_id_from_erc8004_registration(monkeypatch) -> None:
     def _handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/.well-known/agent-card.json":

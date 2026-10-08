@@ -1130,6 +1130,8 @@ async def home_page(
                 "description": sanitize_ui_text(agent.description, max_length=2000),
                 "url": sanitize_ui_text(agent.url, max_length=2048),
                 "health_status": agent.health_status,
+                "agent_card_url": agent.agent_card_url,
+                "last_healthy_at": agent.last_healthy_at,
                 "is_stale": is_stale,
                 "stale_days": stale_days,
                 "registered_at": agent.registered_at.isoformat(),
@@ -1255,6 +1257,15 @@ async def search_page(
                 "name": sanitize_ui_text(agent["name"], max_length=255),
                 "description": sanitize_ui_text(agent.get("description"), max_length=2000),
                 "url": sanitize_ui_text(agent["url"], max_length=2048),
+                # The JSON API dict carries last_healthy_at as an ISO string,
+                # but search.html calls agent.last_healthy_at.strftime(...)
+                # when it is truthy. Convert for the HTML context only so the
+                # API representation stays a string.
+                "last_healthy_at": (
+                    datetime.fromisoformat(agent["last_healthy_at"])
+                    if agent.get("last_healthy_at")
+                    else None
+                ),
             }
             for agent in results["agents"]
         ],
@@ -5821,6 +5832,10 @@ async def list_agents(
             "skills": agent.skills or [],
             "capabilities": agent.capabilities or [],
             "health_status": agent.health_status,
+            "last_healthy_at": (
+                agent.last_healthy_at.isoformat() if agent.last_healthy_at else None
+            ),
+            "email_verified": agent.email_verified,
             "registered_at": agent.registered_at.isoformat(),
             "is_stale": is_stale,
             "stale_days": stale_days,

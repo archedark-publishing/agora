@@ -371,3 +371,69 @@ async def test_search_page_shows_agent_json_badge_for_verified_agents(client) ->
     assert response.status_code == 200
     assert agent_name in response.text
     assert "agent.json v1.4" in response.text
+
+
+async def set_agent_card_url(*, name: str, url: str | None) -> None:
+    async with AsyncSessionLocal() as session:
+        agent = await session.scalar(select(Agent).where(Agent.name == name))
+        assert agent is not None
+        agent.agent_card_url = url
+        await session.commit()
+
+
+async def test_search_page_renders_when_listing_has_proven_endpoint(client) -> None:
+    # Regression (Astra review of PR #127): search_page passed the JSON API
+    # dicts (last_healthy_at as an ISO string) into search.html, which calls
+    # agent.last_healthy_at.strftime(...) when it is truthy. Any listing with
+    # a proof-of-life timestamp crashed the search page with a 500
+    # (UndefinedError: 'str object' has no attribute 'strftime').
+    agent_name = "Proven Endpoint Search Agent"
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(agent_name, "https://example.com/proven-endpoint-search-agent"),
+        headers={"X-API-Key": "proven-endpoint-search-key"},
+    )
+    assert register.status_code == 201
+
+    now = datetime.now(tz=timezone.utc)
+    await set_agent_health_state(
+        name=agent_name,
+        health_status="healthy",
+        registered_at=now - timedelta(hours=2),
+        last_healthy_at=now - timedelta(hours=2),
+    )
+
+    response = await client.get("/search")
+    assert response.status_code == 200
+    assert agent_name in response.text
+    assert "Last healthy" in response.text
+
+
+async def test_search_page_health_badge_renders_without_card_url(client) -> None:
+    # Regression (Astra review of PR #127): the health badge was gated on
+    # agent_card_url, hiding it for listings whose endpoint was verified
+    # through agent.url (proof-of-life sets last_healthy_at) with no
+    # explicit card URL ever claimed. The gate is the proof-of-life
+    # timestamp alone, so the Healthy badge must render here.
+    agent_name = "URL Proven Health Badge Agent"
+    register = await client.post(
+        "/api/v1/agents",
+        json=build_payload(agent_name, "https://example.com/url-proven-health-badge-agent"),
+        headers={"X-API-Key": "url-proven-badge-search-key"},
+    )
+    assert register.status_code == 201
+
+    now = datetime.now(tz=timezone.utc)
+    await set_agent_health_state(
+        name=agent_name,
+        health_status="healthy",
+        registered_at=now - timedelta(hours=2),
+        last_healthy_at=now - timedelta(hours=1),
+    )
+    # Minimal/endpoint-discovered listings have no explicit card URL.
+    await set_agent_card_url(name=agent_name, url=None)
+
+    response = await client.get("/search", params={"health": "healthy"})
+    assert response.status_code == 200
+    assert agent_name in response.text
+    assert ">Healthy<" in response.text
