@@ -69,23 +69,27 @@ def stale_filter_expression(
 def agent_counts_as_live(
     *,
     health_status: str,
-    url: str | None,
+    has_verified_endpoint: bool,
     availability: dict[str, Any] | None,
+    email_verified: bool = False,
     now: datetime | None = None,
 ) -> bool:
     """Whether an agent counts toward the directory's live/health stat.
 
-    Agents with a URL count only with a passing health check. Email-only
-    listings (no URL) are skipped by the health checker by design, so their
-    liveness comes from heartbeats instead: they count while the
-    heartbeat-declared ``next_active_at`` window has not elapsed.
+    Listings with a verified endpoint (proof-of-life passed at some point)
+    count only with a passing health check. Listings that never passed
+    proof-of-life have no endpoint health to report: email verification is
+    the strongest available check, so they count as live while the email
+    is verified. With neither, liveness comes from the heartbeat-declared
+    ``next_active_at`` window.
     """
     if health_status == "healthy":
         return True
-    if url or health_status == "unhealthy":
-        # Has an endpoint (only a passing check counts), or a check failed:
-        # never counts as live.
+    if has_verified_endpoint:
+        # Had a verified endpoint: only a passing check counts.
         return False
+    if email_verified:
+        return True
     now_utc = now or datetime.now(tz=timezone.utc)
     next_active_raw = (availability or {}).get("next_active_at")
     if not next_active_raw:
