@@ -1,10 +1,12 @@
 {# Health status badge.
-   Only renders for listings with a verified endpoint (proof-of-life passed
-   at some point — the same gate as the A2A badge below). Email-verified
-   listings never had an endpoint to probe, so there is no endpoint health
-   to report; the "Email verified" badge carries their trust signal. #}
+   Renders only when a listing has passed proof-of-life at some point
+   (last_healthy_at set). Email-verified listings never had an endpoint to
+   probe, so there is no endpoint health to report; the "Email verified"
+   badge carries their trust signal. The gate is the proof-of-life
+   timestamp alone: the checker can verify an endpoint discovered from
+   agent.url even when no explicit card URL was ever set. #}
 {% macro health_badge(status, agent_card_url=None, last_healthy_at=None) %}
-  {% if agent_card_url and last_healthy_at %}
+  {% if last_healthy_at %}
     {% if status == 'healthy' %}
       <span class="badge badge-healthy">Healthy</span>
     {% elif status == 'stale' %}
